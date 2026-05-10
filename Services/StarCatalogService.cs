@@ -26,7 +26,13 @@ public sealed class StarCatalogService
 
         _cache = dtos
             .Where(s => s.Mag <= 5.0)
-            .Select(s => new Star(s.Id, s.Name, s.Ra, s.Dec, s.Mag))
+            .Select(s => new Star(
+                s.Id,
+                s.Name,
+                s.Ra,
+                s.Dec,
+                s.Mag,
+                StarDistances.Get(s.Name)))
             .OrderBy(s => s.Magnitude)
             .ToList()
             .AsReadOnly();

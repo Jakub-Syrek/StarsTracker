@@ -39,6 +39,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private string _highlightedStarName = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasHighlightedStarDistance))]
+    private string _highlightedStarDistance = string.Empty;
+
+    public bool HasHighlightedStarDistance => !string.IsNullOrEmpty(HighlightedStarDistance);
+
+    [ObservableProperty]
     private bool _hasHighlightedStar;
 
     [ObservableProperty]
@@ -178,6 +184,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _fovHorizontalDeg = horizontalFovDeg;
     }
 
+    /// <summary>
+    /// Renders a light-year distance with appropriate precision: two
+    /// significant figures under 100 ly, integers otherwise.
+    /// </summary>
+    private static string FormatDistance(double lightYears)
+    {
+        if (lightYears < 100) return $"{lightYears:0.#} ly away";
+        if (lightYears < 1000) return $"{lightYears:0} ly away";
+        return $"{lightYears:N0} ly away";
+    }
+
     // ---- Core refresh cycle ----
 
     private void OnOrientationChanged() { /* timer drives updates */ }
@@ -211,12 +228,21 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         foreach (var star in _allStars)
         {
-            double raDeg = star.RA * 15.0;
+            // Catalog is at the J2000 epoch; correct to the observation date
+            // (linear approximation, accurate to a few arcseconds for ~50 years).
+            double raDegJ2000 = star.RA * 15.0;
+            var (raDeg, decDeg) = AstronomyService.PrecessFromJ2000(
+                raDegJ2000, star.Dec, utcNow);
+
             AstronomyService.EquatorialToHorizontal(
-                raDeg, star.Dec,
+                raDeg, decDeg,
                 _latitudeDeg, _longitudeDeg,
                 utcNow,
                 out double az, out double alt);
+
+            // Atmospheric refraction lifts apparent altitude — significant near
+            // the horizon (~0.5°), negligible above 30°.
+            alt += AstronomyService.AtmosphericRefractionDeg(alt);
 
             if (alt < -5.0) continue;
 
@@ -259,6 +285,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         HasHighlightedStar = highlighted is not null;
         HighlightedStarName = highlighted?.Name ?? string.Empty;
+        HighlightedStarDistance = highlighted?.DistanceLightYears is { } d
+            ? FormatDistance(d)
+            : string.Empty;
 
         RedrawRequested?.Invoke();
     }

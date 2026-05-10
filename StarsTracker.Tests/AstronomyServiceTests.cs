@@ -188,4 +188,97 @@ public sealed class AstronomyServiceTests
         az1.Should().BeApproximately(az2, 2);
         alt1.Should().BeApproximately(alt2, 2);
     }
+
+    // ---- Atmospheric refraction (Saemundsson) ----
+
+    [Fact]
+    public void Refraction_AtZenith_IsEffectivelyZero()
+    {
+        // At 90° altitude the formula returns ~0 (light passes vertically).
+        AstronomyService.AtmosphericRefractionDeg(90).Should().BeApproximately(0, 0.01);
+    }
+
+    [Fact]
+    public void Refraction_AtThirtyDegrees_IsAroundOneArcminute()
+    {
+        // Reference: Saemundsson at h=30° → ~1.7'  =  ~0.028°
+        double r = AstronomyService.AtmosphericRefractionDeg(30);
+        r.Should().BeInRange(0.02, 0.04);
+    }
+
+    [Fact]
+    public void Refraction_AtHorizon_IsAroundHalfDegree()
+    {
+        // Saemundsson at h=0° → ~34.5'  =  ~0.575°
+        double r = AstronomyService.AtmosphericRefractionDeg(0);
+        r.Should().BeInRange(0.45, 0.7);
+    }
+
+    [Fact]
+    public void Refraction_FarBelowHorizon_IsZero()
+    {
+        AstronomyService.AtmosphericRefractionDeg(-10).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(5)]
+    [InlineData(15)]
+    [InlineData(45)]
+    [InlineData(80)]
+    public void Refraction_IsAlwaysNonNegative(double altitude)
+    {
+        AstronomyService.AtmosphericRefractionDeg(altitude).Should().BeGreaterThanOrEqualTo(0);
+    }
+
+    [Fact]
+    public void Refraction_DecreasesMonotonically_WithAltitude()
+    {
+        double r0 = AstronomyService.AtmosphericRefractionDeg(0);
+        double r10 = AstronomyService.AtmosphericRefractionDeg(10);
+        double r45 = AstronomyService.AtmosphericRefractionDeg(45);
+        double r80 = AstronomyService.AtmosphericRefractionDeg(80);
+        r0.Should().BeGreaterThan(r10);
+        r10.Should().BeGreaterThan(r45);
+        r45.Should().BeGreaterThan(r80);
+    }
+
+    // ---- Precession (J2000 → epoch) ----
+
+    [Fact]
+    public void Precession_AtJ2000_LeavesCoordinatesUnchanged()
+    {
+        var j2000 = new DateTime(2000, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+        var (ra, dec) = AstronomyService.PrecessFromJ2000(180.0, 30.0, j2000);
+        ra.Should().BeApproximately(180.0, 1e-9);
+        dec.Should().BeApproximately(30.0, 1e-9);
+    }
+
+    [Fact]
+    public void Precession_OverFiftyYears_MovesEquatorialStarByAboutPointFiveDeg()
+    {
+        // Equatorial-plane star (Dec=0) — pure RA drift, ~50 arcsec/yr ≈
+        // 0.014°/yr × 50 ≈ 0.7°.
+        var time = new DateTime(2050, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+        var (ra, _) = AstronomyService.PrecessFromJ2000(0, 0, time);
+        // RA shift should be positive, ~0.6–0.7°.
+        ra.Should().BeInRange(0.5, 0.8);
+    }
+
+    [Fact]
+    public void Precession_ProducesNormalizedRA()
+    {
+        // Negative-shift edge case: confirm RA stays in [0, 360).
+        var future = new DateTime(2100, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+        var (ra, _) = AstronomyService.PrecessFromJ2000(359.9, 0, future);
+        ra.Should().BeInRange(0, 360);
+    }
+
+    [Fact]
+    public void Precession_DeclinationDriftIsBoundedFor30Years()
+    {
+        // Worst-case Dec drift ≈ 20"/yr ≈ 0.0056°/yr × 30 ≈ 0.17°.
+        var time = new DateTime(2030, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+        var (_, dec) = AstronomyService.PrecessFromJ2000(0, 30, time);
+        Math.Abs(dec - 30.0).Should().BeLessThan(0.5);
+    }
 }

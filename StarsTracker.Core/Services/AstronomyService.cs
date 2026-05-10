@@ -69,6 +69,66 @@ public static class AstronomyService
             azimuthDeg = 360.0 - azimuthDeg;
     }
 
+    /// <summary>
+    /// Atmospheric refraction lifts the apparent altitude of a star above
+    /// its true value, especially near the horizon. Uses Saemundsson's
+    /// inverse-of-Bennett formula (1986), which expects the TRUE altitude
+    /// as input and returns the refraction in degrees that should be added
+    /// to obtain the APPARENT altitude as seen by an observer at sea level
+    /// under standard atmospheric conditions.
+    /// </summary>
+    /// <param name="trueAltitudeDeg">Geometric altitude of the body, degrees.</param>
+    /// <returns>Refraction in degrees (always non-negative). Below the
+    /// horizon (alt &lt; -1°) the formula breaks down, so 0 is returned.</returns>
+    public static double AtmosphericRefractionDeg(double trueAltitudeDeg)
+    {
+        if (trueAltitudeDeg < -1.0) return 0.0;
+        double inner = trueAltitudeDeg + 10.3 / (trueAltitudeDeg + 5.11);
+        double tan = Math.Tan(inner * Math.PI / 180.0);
+        if (Math.Abs(tan) < 1e-12) return 0.0;
+        // Saemundsson returns refraction in arcminutes; convert to degrees.
+        return (1.02 / tan) / 60.0;
+    }
+
+    /// <summary>
+    /// Linear precession from the J2000.0 epoch to the supplied UTC time.
+    /// Accurate to a few arcseconds for the next ~50 years post-2000, which
+    /// is good enough for visual AR overlay use. RA shifts by roughly
+    /// 0.014° per year, Dec by up to ~20" per year depending on right
+    /// ascension.
+    /// </summary>
+    /// <param name="raDeg">Right ascension at J2000, degrees (0–360).</param>
+    /// <param name="decDeg">Declination at J2000, degrees (-90..+90).</param>
+    /// <param name="utc">UTC time of observation.</param>
+    /// <returns>(RA, Dec) in degrees at the observation epoch.</returns>
+    public static (double raDeg, double decDeg) PrecessFromJ2000(
+        double raDeg, double decDeg, DateTime utc)
+    {
+        var j2000 = new DateTime(2000, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+        double yearsSince = (utc.ToUniversalTime() - j2000).TotalDays / 365.25;
+
+        double raRad = raDeg * Math.PI / 180.0;
+        double decRad = decDeg * Math.PI / 180.0;
+
+        // Precession rates per Julian year (J2000.0):
+        //   m  = 3.07496 sec of time / yr  (RA constant term)
+        //   n  = 1.33621 sec of time / yr  (RA latitude-dependent term)
+        //   nd = 20.0431 arcsec        / yr  (Dec)
+        const double mSecPerYear = 3.07496;
+        const double nTSecPerYear = 1.33621;
+        const double nDArcsecPerYear = 20.0431;
+
+        double dRaSec = (mSecPerYear + nTSecPerYear * Math.Sin(raRad) * Math.Tan(decRad))
+                        * yearsSince;
+        double dDecArcsec = nDArcsecPerYear * Math.Cos(raRad) * yearsSince;
+
+        // 1 sec of time = 15 arcseconds = 15/3600 degrees
+        double dRaDeg = dRaSec * 15.0 / 3600.0;
+        double dDecDeg = dDecArcsec / 3600.0;
+
+        return (NormalizeAngle(raDeg + dRaDeg), decDeg + dDecDeg);
+    }
+
     // --- Helpers ---
 
     private static double ToJulianDate(DateTime utc)

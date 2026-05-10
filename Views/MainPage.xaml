@@ -57,7 +57,7 @@
                VerticalOptions="Center"
                IsVisible="{Binding IsLoading}" />
 
-        <!-- ⑤ Highlighted star name — bottom of screen -->
+        <!-- ⑤ Highlighted star name + distance — bottom of screen -->
         <Border HorizontalOptions="Center"
                 VerticalOptions="End"
                 Margin="0,0,0,140"
@@ -68,11 +68,18 @@
             <Border.StrokeShape>
                 <RoundRectangle CornerRadius="20" />
             </Border.StrokeShape>
-            <Label Text="{Binding HighlightedStarName}"
-                   TextColor="Yellow"
-                   FontSize="22"
-                   FontAttributes="Bold"
-                   HorizontalOptions="Center" />
+            <VerticalStackLayout Spacing="2">
+                <Label Text="{Binding HighlightedStarName}"
+                       TextColor="Yellow"
+                       FontSize="22"
+                       FontAttributes="Bold"
+                       HorizontalOptions="Center" />
+                <Label Text="{Binding HighlightedStarDistance}"
+                       TextColor="#CCDDFF"
+                       FontSize="12"
+                       HorizontalOptions="Center"
+                       IsVisible="{Binding HasHighlightedStarDistance}" />
+            </VerticalStackLayout>
         </Border>
 
         <!-- ⑥ Aim mode overlay: instructions + confirm/cancel buttons -->
