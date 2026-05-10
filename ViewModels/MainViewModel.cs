@@ -29,7 +29,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsLoading))]
-    private string _statusText = "Inicjalizacja...";
+    private string _statusText = "Initializing...";
 
     public bool IsLoading => !string.IsNullOrEmpty(StatusText);
 
@@ -55,7 +55,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _recordingStatusText = string.Empty;
 
-    public string RecordButtonText => IsRecording ? "Stop" : "Nagraj";
+    public string RecordButtonText => IsRecording ? "Stop" : "Record";
 
     [ObservableProperty]
     private bool _isLandmarkPickerVisible;
@@ -68,7 +68,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public string AimInstructionText => CalibrationTarget is null
         ? string.Empty
-        : $"Wyceluj krzyżyk na: {CalibrationTarget.Name}";
+        : $"Aim crosshair at: {CalibrationTarget.Name}";
 
     public bool IsAimingMode => CalibrationTarget is not null;
     public bool IsNotAimingMode => CalibrationTarget is null;
@@ -115,7 +115,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             IsRecording = false;
             RecordingStatusText = path is null
                 ? string.Empty
-                : $"Zapisano: {System.IO.Path.GetFileName(path)}";
+                : $"Saved: {System.IO.Path.GetFileName(path)}";
         });
     }
 
@@ -124,7 +124,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Application.Current?.Dispatcher.Dispatch(() =>
         {
             IsRecording = false;
-            RecordingStatusText = $"Błąd nagrywania: {message}";
+            RecordingStatusText = $"Recording error: {message}";
         });
     }
 
@@ -141,13 +141,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public async Task InitializeAsync()
     {
-        StatusText = "Ładowanie katalogu gwiazd...";
+        StatusText = "Loading star catalog...";
         _allStars = await _catalog.GetVisibleStarsAsync();
 
-        StatusText = "Pobieranie lokalizacji GPS...";
+        StatusText = "Acquiring GPS location...";
         await RequestLocationAsync();
 
-        StatusText = "Uruchamianie sensorów...";
+        StatusText = "Starting sensors...";
         _orientation.Start();
 
         _refreshTimer = Application.Current!.Dispatcher.CreateTimer();
@@ -312,7 +312,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
         else
         {
-            CalibrationStatusText = $"Kalibracja: az {az:+0.0;-0.0;0}°  alt {alt:+0.0;-0.0;0}°";
+            CalibrationStatusText = $"Calibration: az {az:+0.0;-0.0;0}°  alt {alt:+0.0;-0.0;0}°";
         }
     }
 
@@ -328,7 +328,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
             if (status != PermissionStatus.Granted)
             {
-                LocationText = "Brak dostępu do GPS — używam Warszawy";
+                LocationText = "No GPS access — using Warsaw";
                 _latitudeDeg = 52.229676;
                 _longitudeDeg = 21.012229;
                 _hasLocation = true;
@@ -348,7 +348,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             }
             else
             {
-                LocationText = "Brak GPS — używam Warszawy";
+                LocationText = "GPS unavailable — using Warsaw";
                 _latitudeDeg = 52.229676;
                 _longitudeDeg = 21.012229;
                 _hasLocation = true;
@@ -356,7 +356,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
         catch
         {
-            LocationText = "Błąd GPS — używam Warszawy";
+            LocationText = "GPS error — using Warsaw";
             _latitudeDeg = 52.229676;
             _longitudeDeg = 21.012229;
             _hasLocation = true;

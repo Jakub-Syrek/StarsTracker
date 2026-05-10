@@ -64,7 +64,7 @@ public class MainActivity : MauiAppCompatActivity
 
         if (resultCode != Result.Ok || data is null)
         {
-            ScreenRecorder.NotifyError("Użytkownik nie zezwolił na nagrywanie");
+            ScreenRecorder.NotifyError("User denied screen recording permission");
             return;
         }
 

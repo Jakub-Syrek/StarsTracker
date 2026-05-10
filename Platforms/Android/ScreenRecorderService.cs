@@ -183,9 +183,9 @@ public sealed class ScreenRecorderService : Service
         var nm = (NotificationManager?)GetSystemService(NotificationService);
         if (nm?.GetNotificationChannel(ChannelId) != null) return;
 
-        var channel = new NotificationChannel(ChannelId, "Nagrywanie ekranu", NotificationImportance.Low)
+        var channel = new NotificationChannel(ChannelId, "Screen recording", NotificationImportance.Low)
         {
-            Description = "Pokazywane podczas nagrywania ekranu w StarsTracker"
+            Description = "Shown while StarsTracker is recording the screen"
         };
         nm?.CreateNotificationChannel(channel);
     }
@@ -194,7 +194,7 @@ public sealed class ScreenRecorderService : Service
     {
         return new NotificationCompat.Builder(this, ChannelId)
             .SetContentTitle("StarsTracker")
-            .SetContentText("Nagrywanie ekranu...")
+            .SetContentText("Recording screen...")
             .SetSmallIcon(global::Android.Resource.Drawable.PresenceVideoOnline)
             .SetOngoing(true)
             .Build();
