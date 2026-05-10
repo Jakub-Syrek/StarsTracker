@@ -29,40 +29,54 @@ jobs:
         id: bump
         shell: bash
         run: |
-          # Find the last semver tag, default to v0.0.0 if none.
-          last_tag=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo "v0.0.0")
-          echo "last_tag=$last_tag" >> "$GITHUB_OUTPUT"
+          # Read the current declared version from the main csproj — this is the
+          # single source of truth for the baseline. The last git tag is only used
+          # to determine which commits to inspect for bump intent, never to seed
+          # the next version (otherwise a missing tag would silently restart at
+          # 0.x.y even though the project has shipped 1.x.y).
+          current_version=$(grep -oP '<Version>\K[0-9]+\.[0-9]+\.[0-9]+' StarsTracker.csproj | head -n1)
+          if [ -z "$current_version" ]; then
+            echo "::error::Could not read <Version> from StarsTracker.csproj"
+            exit 1
+          fi
+          echo "current_version=$current_version" >> "$GITHUB_OUTPUT"
 
-          range="$last_tag..HEAD"
-          if [ "$last_tag" = "v0.0.0" ]; then
+          last_tag=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo "")
+          if [ -n "$last_tag" ]; then
+            range="$last_tag..HEAD"
+          else
             range="HEAD"
           fi
+          echo "Inspecting commits in $range"
 
           messages=$(git log "$range" --pretty=format:'%s%n%b' || true)
 
-          bump="patch"
-          if echo "$messages" | grep -qE '^BREAKING CHANGE:|!:'; then
+          # Conventional Commits → bump type. `chore`, `ci`, and merge commits
+          # do NOT trigger a release bump — they are tooling/process noise.
+          bump="none"
+          if echo "$messages" | grep -qE '^BREAKING CHANGE:|^[a-z]+(\([^)]+\))?!:'; then
             bump="major"
           elif echo "$messages" | grep -qE '^feat(\([^)]+\))?:'; then
             bump="minor"
-          elif echo "$messages" | grep -qE '^(fix|docs|test|refactor|perf|chore|ci|security)(\([^)]+\))?:'; then
+          elif echo "$messages" | grep -qE '^(fix|docs|test|refactor|perf|security)(\([^)]+\))?:'; then
             bump="patch"
-          else
-            echo "No conventional commits found since $last_tag — skipping release."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            exit 0
           fi
-          echo "bump=$bump" >> "$GITHUB_OUTPUT"
-          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+          if [ "$bump" = "none" ]; then
+            echo "No release-worthy commits found since ${last_tag:-<no tag>} — skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "bump=$bump" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Compute next version
         id: next
         if: steps.bump.outputs.skip != 'true'
         shell: bash
         run: |
-          last="${{ steps.bump.outputs.last_tag }}"
-          last_clean="${last#v}"
-          IFS='.' read -r major minor patch <<< "$last_clean"
+          base="${{ steps.bump.outputs.current_version }}"
+          IFS='.' read -r major minor patch <<< "$base"
           case "${{ steps.bump.outputs.bump }}" in
             major) major=$((major+1)); minor=0; patch=0 ;;
             minor) minor=$((minor+1)); patch=0 ;;
@@ -100,8 +114,10 @@ jobs:
         id: notes
         shell: bash
         run: |
-          range="${{ steps.bump.outputs.last_tag }}..HEAD~1"
-          if [ "${{ steps.bump.outputs.last_tag }}" = "v0.0.0" ]; then
+          last_tag=$(git describe --tags --abbrev=0 --match 'v*' --exclude '${{ steps.next.outputs.tag }}' 2>/dev/null || echo "")
+          if [ -n "$last_tag" ]; then
+            range="$last_tag..HEAD~1"
+          else
             range="HEAD~1"
           fi
           {

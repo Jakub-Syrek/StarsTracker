@@ -52,23 +52,40 @@ jobs:
 
       - name: Verify commit authorship (Jakub Syrek only)
         shell: bash
+        env:
+          # Comma-separated allow-list of permitted committer e-mails for Jakub.
+          ALLOWED_EMAILS: 'jakubvonsyrek@gmail.com,jaqb.syrek@student.uj.edu.pl'
         run: |
-          # Pull-request commits range
+          # Determine the exact commit range introduced by this push / PR.
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             range="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
           else
-            range="HEAD~5..HEAD"
+            before='${{ github.event.before }}'
+            after='${{ github.event.after }}'
+            # First push to a branch reports before=000... — only inspect after's commit.
+            if [[ "$before" =~ ^0+$ ]]; then
+              range="$after^..$after"
+            else
+              range="$before..$after"
+            fi
           fi
 
-          bad_authors=$(git log "$range" --pretty=format:'%an <%ae>' | sort -u | grep -v '^Jakub Syrek <jakubvonsyrek@gmail.com>$' || true)
+          echo "Inspecting commits in range: $range"
+
+          allow_pattern=$(echo "$ALLOWED_EMAILS" | sed 's/,/|/g')
+
+          bad_authors=$(git log "$range" --pretty=format:'%an <%ae>' \
+            | sort -u \
+            | grep -vE "^Jakub Syrek <($allow_pattern)>$" || true)
           if [ -n "$bad_authors" ]; then
-            echo "::error::Unexpected commit authors detected — only 'Jakub Syrek <jakubvonsyrek@gmail.com>' is allowed:"
+            echo "::error::Unexpected commit authors detected. Allowed: Jakub Syrek with one of: $ALLOWED_EMAILS"
             echo "$bad_authors"
             exit 1
           fi
 
-          # Reject any AI co-author trailer
-          if git log "$range" --pretty=format:'%B' | grep -iE '^Co-Authored-By:.*(Claude|GPT|Copilot|noreply@anthropic\.com)' ; then
+          # Reject any AI co-author trailer.
+          if git log "$range" --pretty=format:'%B' \
+              | grep -iE '^Co-Authored-By:.*(Claude|GPT|Copilot|noreply@anthropic\.com)'; then
             echo "::error::AI co-author trailers are forbidden by project policy."
             exit 1
           fi

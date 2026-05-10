@@ -4,9 +4,9 @@
 
 | Version | Supported |
 |---------|-----------|
-| 1.0.x   | ✅        |
+| 0.1.x   | ✅        |
 
-Older or unreleased pre-1.0 builds are not maintained — please upgrade.
+Pre-`0.1.0` builds are unreleased and not maintained — please upgrade.
 
 ## Reporting a Vulnerability
 
