@@ -32,7 +32,10 @@ public sealed class StarCatalogService
                 s.Ra,
                 s.Dec,
                 s.Mag,
-                StarDistances.Get(s.Name)))
+                // Prefer the distance shipped in stars.json (sourced from HYG
+                // via scripts/merge_hyg_distances.py); fall back to the
+                // hand-curated table for the few rows HYG did not match.
+                s.DistLy ?? StarDistances.Get(s.Name)))
             .OrderBy(s => s.Magnitude)
             .ToList()
             .AsReadOnly();
@@ -47,7 +50,8 @@ internal sealed record StarDto(
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("ra")] double Ra,
     [property: JsonPropertyName("dec")] double Dec,
-    [property: JsonPropertyName("mag")] double Mag);
+    [property: JsonPropertyName("mag")] double Mag,
+    [property: JsonPropertyName("dist_ly")] double? DistLy = null);
 
 [JsonSerializable(typeof(StarDto[]))]
 [JsonSourceGenerationOptions(PropertyNameCaseInsensitive = true)]
