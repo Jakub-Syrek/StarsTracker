@@ -1,0 +1,7 @@
+<Project>
+  <!-- Android SDK and JDK paths for this machine (Visual Studio 2026 / Android openjdk) -->
+  <PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
+    <AndroidSdkDirectory Condition="'$(AndroidSdkDirectory)' == ''">C:\Program Files (x86)\Android\android-sdk</AndroidSdkDirectory>
+    <JavaSdkDirectory Condition="'$(JavaSdkDirectory)' == ''">C:\Program Files\Android\openjdk\jdk-21.0.8</JavaSdkDirectory>
+  </PropertyGroup>
+</Project>

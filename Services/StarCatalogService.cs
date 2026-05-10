@@ -35,8 +35,8 @@ public sealed class StarCatalogService
     }
 }
 
-// DTO matching the JSON shape
-file sealed record StarDto(
+// DTO matching the JSON shape — must be internal (not file) so the JSON source generator can reference it
+internal sealed record StarDto(
     [property: JsonPropertyName("id")] int Id,
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("ra")] double Ra,

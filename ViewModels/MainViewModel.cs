@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using Microsoft.Maui.Dispatching;
 using Microsoft.Maui.Graphics;
 using StarsTracker.Controls;
 using StarsTracker.Models;
@@ -18,7 +19,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private const double HighlightRadiusDeg = 5.0;
 
     private IReadOnlyList<Star> _allStars = [];
-    private ITimer? _refreshTimer;
+    private IDispatcherTimer? _refreshTimer;
     private double _screenWidth = 1;
     private double _screenHeight = 1;
 

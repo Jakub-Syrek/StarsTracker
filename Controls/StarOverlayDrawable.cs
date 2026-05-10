@@ -33,8 +33,8 @@ public sealed class StarOverlayDrawable : IDrawable
     public void Draw(ICanvas canvas, RectF dirtyRect)
     {
         _screenSize = dirtyRect.Size;
-        float cx = dirtyRect.MidX;
-        float cy = dirtyRect.MidY;
+        float cx = dirtyRect.Center.X;
+        float cy = dirtyRect.Center.Y;
 
         canvas.SaveState();
 
