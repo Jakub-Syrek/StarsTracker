@@ -1,6 +1,7 @@
 using StarsTracker.ViewModels;
 
 #if ANDROID
+using Android.Runtime;
 using Android.Views;
 using AndroidX.Camera.Core;
 using AndroidX.Camera.Lifecycle;
@@ -152,12 +153,13 @@ public partial class MainPage : ContentPage
                     previewView.SurfaceProvider);
 
                 _cameraProvider.UnbindAll();
-                _cameraProvider.BindToLifecycle(
+                var camera = _cameraProvider.BindToLifecycle(
                     (ILifecycleOwner)activity,
                     CameraSelector.DefaultBackCamera,
                     preview);
 
                 Log("CameraX bound to lifecycle — preview started");
+                TryReportCameraFov(activity);
                 tcs.TrySetResult(true);
             }
             catch (System.Exception ex)
@@ -168,6 +170,74 @@ public partial class MainPage : ContentPage
         }), ContextCompat.GetMainExecutor(activity));
 
         await tcs.Task;
+    }
+
+    /// <summary>
+    /// Reads the per-device horizontal field of view from Camera2
+    /// CameraCharacteristics and forwards it to the view model. Iterates the
+    /// physical back-facing cameras and picks the one whose computed FOV
+    /// falls in the [55°, 90°] range — the typical "main" lens, distinct
+    /// from ultra-wide (>95°) and tele (<50°) sub-cameras present on
+    /// flagships. Falls back silently to the hardcoded default on any error.
+    /// </summary>
+    private void TryReportCameraFov(AndroidX.Activity.ComponentActivity activity)
+    {
+        try
+        {
+            var manager = (Android.Hardware.Camera2.CameraManager)
+                activity.GetSystemService(Android.Content.Context.CameraService)!;
+            var ids = manager.GetCameraIdList();
+            if (ids is null || ids.Length == 0) return;
+
+            double bestMain = -1;
+            double anyBack = -1;
+            string? mainId = null;
+            string? anyId = null;
+
+            foreach (var id in ids)
+            {
+                var chars = manager.GetCameraCharacteristics(id);
+                var facingObj = chars.Get(
+                    Android.Hardware.Camera2.CameraCharacteristics.LensFacing!);
+                int facing = facingObj?.JavaCast<Java.Lang.Integer>()?.IntValue() ?? -1;
+                if (facing != (int)Android.Hardware.Camera2.LensFacing.Back) continue;
+
+                var focalsObj = chars.Get(
+                    Android.Hardware.Camera2.CameraCharacteristics.LensInfoAvailableFocalLengths!);
+                var sensorSizeObj = chars.Get(
+                    Android.Hardware.Camera2.CameraCharacteristics.SensorInfoPhysicalSize!);
+                float[]? focals = focalsObj?.ToArray<float>();
+                var sensorSize = sensorSizeObj?.JavaCast<Android.Util.SizeF>();
+                if (focals is null || focals.Length == 0 || sensorSize is null) continue;
+
+                float focalMm = focals.Min();
+                float sensorWidthMm = sensorSize.Width;
+                double fovDeg = 2.0 * System.Math.Atan(sensorWidthMm / (2.0 * focalMm))
+                                    * 180.0 / System.Math.PI;
+
+                if (anyBack < 0) { anyBack = fovDeg; anyId = id; }
+                if (fovDeg is >= 55 and <= 90 && bestMain < 0)
+                {
+                    bestMain = fovDeg;
+                    mainId = id;
+                }
+            }
+
+            double chosen = bestMain > 0 ? bestMain : anyBack;
+            string? chosenId = mainId ?? anyId;
+            if (chosen < 0)
+            {
+                Log("FOV detection: no usable back camera characteristics — using default");
+                return;
+            }
+
+            Log($"Camera2 FOV: {chosen:F1}° (cameraId={chosenId})");
+            MainThread.BeginInvokeOnMainThread(() => _vm.SetCameraFov(chosen));
+        }
+        catch (System.Exception ex)
+        {
+            Log($"FOV detection failed: {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     private void StopNativeCamera()

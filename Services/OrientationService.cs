@@ -22,6 +22,13 @@ public sealed class OrientationService : IDisposable
     public float QuatW { get; private set; } = 1f;
     public bool HasQuaternion { get; private set; }
 
+    // SLERP smoothing factor in [0, 1] applied to every incoming sample:
+    // filtered = Slerp(filtered, raw, SmoothingAlpha). Lower = more damping
+    // / more lag, higher = noisier / less lag. 0.2 at ~60 Hz ≈ ~50 ms time
+    // constant — visually smooth but no perceptible lag.
+    private const double SmoothingAlpha = 0.2;
+    private bool _quaternionInitialised;
+
     // Manual calibration: signed offset added to sensor azimuth so that a known
     // landmark seen through the camera matches its true bearing. Persisted across
     // app restarts.
@@ -70,7 +77,9 @@ public sealed class OrientationService : IDisposable
         {
             _useOrientationSensor = true;
             OrientationSensor.Default.ReadingChanged += OnOrientationChanged;
-            OrientationSensor.Default.Start(SensorSpeed.UI);
+            // Game speed is ~60 Hz on most devices — combined with SLERP smoothing
+            // this gives a much steadier overlay than the default UI speed (~16 Hz).
+            OrientationSensor.Default.Start(SensorSpeed.Game);
         }
         else
         {
@@ -117,10 +126,25 @@ public sealed class OrientationService : IDisposable
     private void OnOrientationChanged(object? sender, OrientationSensorChangedEventArgs e)
     {
         var q = e.Reading.Orientation;
-        QuatX = q.X; QuatY = q.Y; QuatZ = q.Z; QuatW = q.W;
+
+        if (!_quaternionInitialised)
+        {
+            // Seed the filter with the first sample so we don't slerp away
+            // from a zeroed (0,0,0,1) initial state for the first 30+ frames.
+            QuatX = q.X; QuatY = q.Y; QuatZ = q.Z; QuatW = q.W;
+            _quaternionInitialised = true;
+        }
+        else
+        {
+            var (fx, fy, fz, fw) = OrientationMath.Slerp(
+                QuatX, QuatY, QuatZ, QuatW,
+                q.X, q.Y, q.Z, q.W,
+                SmoothingAlpha);
+            QuatX = (float)fx; QuatY = (float)fy; QuatZ = (float)fz; QuatW = (float)fw;
+        }
         HasQuaternion = true;
 
-        (AzimuthDeg, AltitudeDeg) = OrientationMath.AzimuthAltitude(q.X, q.Y, q.Z, q.W);
+        (AzimuthDeg, AltitudeDeg) = OrientationMath.AzimuthAltitude(QuatX, QuatY, QuatZ, QuatW);
         OrientationChanged?.Invoke();
     }
 

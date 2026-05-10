@@ -66,4 +66,64 @@ public static class OrientationMath
             r[1] * wE + r[4] * wN + r[7] * wU,
             r[2] * wE + r[5] * wN + r[8] * wU);
     }
+
+    /// <summary>
+    /// Spherical linear interpolation between two unit quaternions. Used to
+    /// smooth a noisy stream of orientation samples — the filtered quaternion
+    /// at frame N is <c>Slerp(prev, raw, alpha)</c> with a small alpha
+    /// (e.g. 0.2) to suppress sensor jitter without visible lag.
+    /// </summary>
+    /// <param name="ax">prev quaternion x</param>
+    /// <param name="ay">prev quaternion y</param>
+    /// <param name="az">prev quaternion z</param>
+    /// <param name="aw">prev quaternion w</param>
+    /// <param name="bx">target quaternion x</param>
+    /// <param name="by">target quaternion y</param>
+    /// <param name="bz">target quaternion z</param>
+    /// <param name="bw">target quaternion w</param>
+    /// <param name="t">interpolation factor in [0, 1] — 0 keeps prev, 1 jumps to target</param>
+    public static (double x, double y, double z, double w) Slerp(
+        double ax, double ay, double az, double aw,
+        double bx, double by, double bz, double bw,
+        double t)
+    {
+        double dot = ax * bx + ay * by + az * bz + aw * bw;
+        // If dot is negative, the quaternions are on opposite hemispheres —
+        // negate one to take the shorter great-circle path.
+        if (dot < 0)
+        {
+            bx = -bx; by = -by; bz = -bz; bw = -bw;
+            dot = -dot;
+        }
+
+        // For nearly-collinear quaternions, fall back to normalized lerp to
+        // avoid the divide-by-near-zero in the sin-based formula.
+        const double dotThreshold = 0.9995;
+        double rx, ry, rz, rw;
+        if (dot > dotThreshold)
+        {
+            rx = ax + t * (bx - ax);
+            ry = ay + t * (by - ay);
+            rz = az + t * (bz - az);
+            rw = aw + t * (bw - aw);
+        }
+        else
+        {
+            double theta0 = Math.Acos(Math.Clamp(dot, -1.0, 1.0));
+            double theta = theta0 * t;
+            double sinTheta = Math.Sin(theta);
+            double sinTheta0 = Math.Sin(theta0);
+            double s1 = Math.Cos(theta) - dot * sinTheta / sinTheta0;
+            double s2 = sinTheta / sinTheta0;
+            rx = s1 * ax + s2 * bx;
+            ry = s1 * ay + s2 * by;
+            rz = s1 * az + s2 * bz;
+            rw = s1 * aw + s2 * bw;
+        }
+
+        // Normalize to combat accumulated floating-point drift across calls.
+        double norm = Math.Sqrt(rx * rx + ry * ry + rz * rz + rw * rw);
+        if (norm < 1e-12) return (0, 0, 0, 1);
+        return (rx / norm, ry / norm, rz / norm, rw / norm);
+    }
 }

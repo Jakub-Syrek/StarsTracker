@@ -14,8 +14,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly OrientationService _orientation;
     private readonly LandmarkService _landmarks;
 
-    // Camera horizontal FOV in degrees (typical smartphone)
-    private const double FovH = 65.0;
+    // Camera horizontal FOV in degrees. Initial guess for a typical smartphone
+    // main rear camera; overwritten by Camera2 characteristics during preview
+    // start-up via <see cref="SetCameraFov"/>.
+    private double _fovHorizontalDeg = 65.0;
 
     // Crosshair radius for highlighting (degrees)
     private const double HighlightRadiusDeg = 5.0;
@@ -164,6 +166,18 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _screenHeight = height;
     }
 
+    /// <summary>
+    /// Overrides the horizontal field of view used for the pinhole projection
+    /// with a value measured from the active camera's Camera2 characteristics.
+    /// Clamped to a sane sanity range so that an unexpected sensor reading
+    /// cannot blow up the projection.
+    /// </summary>
+    public void SetCameraFov(double horizontalFovDeg)
+    {
+        if (horizontalFovDeg < 30 || horizontalFovDeg > 120) return;
+        _fovHorizontalDeg = horizontalFovDeg;
+    }
+
     // ---- Core refresh cycle ----
 
     private void OnOrientationChanged() { /* timer drives updates */ }
@@ -182,7 +196,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         double cx = _screenWidth / 2.0;
         double cy = _screenHeight / 2.0;
 
-        double focal = ProjectionMath.FocalLengthPx(_screenWidth, FovH);
+        double focal = ProjectionMath.FocalLengthPx(_screenWidth, _fovHorizontalDeg);
         double highlightPx = focal * Math.Tan(HighlightRadiusDeg * Math.PI / 180.0);
 
         bool useQuat = _orientation.HasQuaternion;

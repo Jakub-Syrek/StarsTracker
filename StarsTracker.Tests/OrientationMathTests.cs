@@ -134,4 +134,85 @@ public sealed class OrientationMathTests
         az.Should().BeInRange(0, 360);
         alt.Should().BeInRange(-90, 90);
     }
+
+    [Fact]
+    public void Slerp_AtZero_ReturnsFirstQuaternion()
+    {
+        var (x, y, z, w) = OrientationMath.Slerp(
+            Sqrt2Over2, 0, 0, Sqrt2Over2,
+            0, Sqrt2Over2, 0, Sqrt2Over2,
+            t: 0);
+        x.Should().BeApproximately(Sqrt2Over2, 1e-9);
+        y.Should().BeApproximately(0, 1e-9);
+        z.Should().BeApproximately(0, 1e-9);
+        w.Should().BeApproximately(Sqrt2Over2, 1e-9);
+    }
+
+    [Fact]
+    public void Slerp_AtOne_ReturnsSecondQuaternion()
+    {
+        var (x, y, z, w) = OrientationMath.Slerp(
+            Sqrt2Over2, 0, 0, Sqrt2Over2,
+            0, Sqrt2Over2, 0, Sqrt2Over2,
+            t: 1);
+        x.Should().BeApproximately(0, 1e-9);
+        y.Should().BeApproximately(Sqrt2Over2, 1e-9);
+        z.Should().BeApproximately(0, 1e-9);
+        w.Should().BeApproximately(Sqrt2Over2, 1e-9);
+    }
+
+    [Fact]
+    public void Slerp_AlwaysProducesUnitQuaternion()
+    {
+        for (double t = 0; t <= 1; t += 0.1)
+        {
+            var (x, y, z, w) = OrientationMath.Slerp(
+                Sqrt2Over2, 0, 0, Sqrt2Over2,
+                0, Sqrt2Over2, 0, Sqrt2Over2,
+                t);
+            double norm = Math.Sqrt(x * x + y * y + z * z + w * w);
+            norm.Should().BeApproximately(1, 1e-9, "slerp results must stay unit-length");
+        }
+    }
+
+    [Fact]
+    public void Slerp_BetweenIdenticalQuaternions_IsIdentity()
+    {
+        var (x, y, z, w) = OrientationMath.Slerp(
+            0.5, 0.5, 0.5, 0.5,
+            0.5, 0.5, 0.5, 0.5,
+            t: 0.5);
+        x.Should().BeApproximately(0.5, 1e-9);
+        y.Should().BeApproximately(0.5, 1e-9);
+        z.Should().BeApproximately(0.5, 1e-9);
+        w.Should().BeApproximately(0.5, 1e-9);
+    }
+
+    [Fact]
+    public void Slerp_TakesShorterArc_WhenDotIsNegative()
+    {
+        // q and -q represent the same rotation; slerp should not jump
+        // through the long way round.
+        var (x, y, z, w) = OrientationMath.Slerp(
+            0, 0, 0, 1,
+            0, 0, 0, -1,
+            t: 0.5);
+        // The short-arc result for a quaternion and its negation is itself.
+        Math.Abs(w).Should().BeApproximately(1, 1e-9);
+        x.Should().BeApproximately(0, 1e-9);
+        y.Should().BeApproximately(0, 1e-9);
+        z.Should().BeApproximately(0, 1e-9);
+    }
+
+    [Fact]
+    public void Slerp_SmallAlpha_KeepsResultCloseToPrev()
+    {
+        // Simulates the runtime smoothing: filtered ≈ prev when alpha is small
+        var (x, y, z, w) = OrientationMath.Slerp(
+            Sqrt2Over2, 0, 0, Sqrt2Over2,
+            0, Sqrt2Over2, 0, Sqrt2Over2,
+            t: 0.1);
+        x.Should().BeGreaterThan(0.6); // still mostly prev
+        y.Should().BeLessThan(0.3);
+    }
 }
