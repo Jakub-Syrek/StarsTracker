@@ -2,7 +2,9 @@
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:vm="clr-namespace:StarsTracker.ViewModels"
+             xmlns:models="clr-namespace:StarsTracker.Models"
              x:Class="StarsTracker.Views.MainPage"
+             x:Name="ThisPage"
              x:DataType="vm:MainViewModel"
              Shell.NavBarIsVisible="False"
              BackgroundColor="Transparent">
@@ -22,17 +24,30 @@
                       VerticalOptions="Fill"
                       SizeChanged="OnOverlaySizeChanged" />
 
-        <!-- ③ Semi-transparent top bar: location info -->
-        <Border HorizontalOptions="Fill"
-                VerticalOptions="Start"
-                BackgroundColor="#66000000"
-                Padding="16,8"
-                StrokeThickness="0">
-            <Label Text="{Binding LocationText}"
-                   TextColor="#AACCE0"
-                   FontSize="12"
-                   HorizontalOptions="Start" />
-        </Border>
+        <!-- ③ Top bar: GPS + calibration status -->
+        <VerticalStackLayout HorizontalOptions="Fill"
+                             VerticalOptions="Start"
+                             Spacing="0">
+            <Border HorizontalOptions="Fill"
+                    BackgroundColor="#66000000"
+                    Padding="16,8"
+                    StrokeThickness="0">
+                <Label Text="{Binding LocationText}"
+                       TextColor="#AACCE0"
+                       FontSize="12"
+                       HorizontalOptions="Start" />
+            </Border>
+            <Border HorizontalOptions="Fill"
+                    BackgroundColor="#66002030"
+                    Padding="16,4"
+                    StrokeThickness="0"
+                    IsVisible="{Binding HasCalibration}">
+                <Label Text="{Binding CalibrationStatusText}"
+                       TextColor="#88FFAA"
+                       FontSize="11"
+                       HorizontalOptions="Start" />
+            </Border>
+        </VerticalStackLayout>
 
         <!-- ④ Status text while initialising -->
         <Label Text="{Binding StatusText}"
@@ -45,7 +60,7 @@
         <!-- ⑤ Highlighted star name — bottom of screen -->
         <Border HorizontalOptions="Center"
                 VerticalOptions="End"
-                Margin="0,0,0,60"
+                Margin="0,0,0,140"
                 BackgroundColor="#88000000"
                 Padding="20,10"
                 StrokeThickness="0"
@@ -59,6 +74,99 @@
                    FontAttributes="Bold"
                    HorizontalOptions="Center" />
         </Border>
+
+        <!-- ⑥ Aim mode overlay: instructions + confirm/cancel buttons -->
+        <Border HorizontalOptions="Fill"
+                VerticalOptions="End"
+                BackgroundColor="#CC000000"
+                Padding="16,12"
+                StrokeThickness="0"
+                IsVisible="{Binding IsAimingMode}">
+            <VerticalStackLayout Spacing="10">
+                <Label Text="{Binding AimInstructionText}"
+                       TextColor="#FFEE88"
+                       FontSize="16"
+                       FontAttributes="Bold"
+                       HorizontalOptions="Center" />
+                <Label Text="Trzymaj telefon nieruchomo z krzyżykiem na celu, potem naciśnij Zatwierdź."
+                       TextColor="#CCCCCC"
+                       FontSize="11"
+                       HorizontalOptions="Center"
+                       HorizontalTextAlignment="Center" />
+                <HorizontalStackLayout HorizontalOptions="Center" Spacing="12">
+                    <Button Text="Anuluj"
+                            Command="{Binding CancelCalibrationCommand}"
+                            BackgroundColor="#444"
+                            TextColor="White"
+                            CornerRadius="20"
+                            Padding="20,8" />
+                    <Button Text="Zatwierdź"
+                            Command="{Binding ConfirmCalibrationCommand}"
+                            BackgroundColor="#3A8"
+                            TextColor="White"
+                            CornerRadius="20"
+                            Padding="20,8" />
+                </HorizontalStackLayout>
+            </VerticalStackLayout>
+        </Border>
+
+        <!-- ⑦ Landmark picker (initially hidden, shown by Kalibruj button) -->
+        <Border HorizontalOptions="Fill"
+                VerticalOptions="End"
+                Margin="0,0,0,60"
+                BackgroundColor="#DD000000"
+                Padding="0,12"
+                StrokeThickness="0"
+                IsVisible="{Binding IsLandmarkPickerVisible}">
+            <VerticalStackLayout Spacing="6">
+                <Label Text="Wybierz punkt referencyjny"
+                       TextColor="#FFEE88"
+                       FontSize="14"
+                       FontAttributes="Bold"
+                       HorizontalOptions="Center" />
+                <CollectionView ItemsSource="{Binding Landmarks}"
+                                HeightRequest="240"
+                                SelectionMode="None">
+                    <CollectionView.ItemTemplate>
+                        <DataTemplate x:DataType="models:Landmark">
+                            <Grid Padding="20,10">
+                                <Grid.GestureRecognizers>
+                                    <TapGestureRecognizer
+                                        Command="{Binding BindingContext.SelectLandmarkCommand, Source={x:Reference ThisPage}}"
+                                        CommandParameter="{Binding .}" />
+                                </Grid.GestureRecognizers>
+                                <Label Text="{Binding Name}"
+                                       TextColor="White"
+                                       FontSize="16" />
+                            </Grid>
+                        </DataTemplate>
+                    </CollectionView.ItemTemplate>
+                </CollectionView>
+            </VerticalStackLayout>
+        </Border>
+
+        <!-- ⑧ Bottom toolbar with Calibrate / Reset buttons -->
+        <HorizontalStackLayout HorizontalOptions="Center"
+                               VerticalOptions="End"
+                               Margin="0,0,0,12"
+                               Spacing="10"
+                               IsVisible="{Binding IsNotAimingMode}">
+            <Button Text="Kalibruj"
+                    Command="{Binding ToggleLandmarkPickerCommand}"
+                    BackgroundColor="#225"
+                    TextColor="#AACCFF"
+                    CornerRadius="18"
+                    Padding="18,6"
+                    FontSize="13" />
+            <Button Text="Zeruj"
+                    Command="{Binding ClearCalibrationCommand}"
+                    BackgroundColor="#332"
+                    TextColor="#FFCC88"
+                    CornerRadius="18"
+                    Padding="14,6"
+                    FontSize="13"
+                    IsVisible="{Binding HasCalibration}" />
+        </HorizontalStackLayout>
 
     </Grid>
 
