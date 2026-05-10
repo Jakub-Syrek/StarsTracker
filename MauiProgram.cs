@@ -25,6 +25,7 @@ public static class MauiProgram
         // Core services
         builder.Services.AddSingleton<StarCatalogService>();
         builder.Services.AddSingleton<OrientationService>();
+        builder.Services.AddSingleton<LandmarkService>();
 
         // ViewModel & Page
         builder.Services.AddTransient<MainViewModel>();

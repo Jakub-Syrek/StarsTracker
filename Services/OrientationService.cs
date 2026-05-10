@@ -22,10 +22,44 @@ public sealed class OrientationService : IDisposable
     public float QuatW { get; private set; } = 1f;
     public bool HasQuaternion { get; private set; }
 
+    // Manual calibration: signed offset added to sensor azimuth so that a known
+    // landmark seen through the camera matches its true bearing. Persisted across
+    // app restarts.
+    public double AzimuthCalibrationDeg { get; private set; }
+    public double AltitudeCalibrationDeg { get; private set; }
+
+    private const string PrefAzKey = "calibration.azimuth";
+    private const string PrefAltKey = "calibration.altitude";
+
     private bool _useOrientationSensor;
     private bool _disposed;
 
     public event Action? OrientationChanged;
+
+    public OrientationService()
+    {
+        AzimuthCalibrationDeg = Preferences.Default.Get(PrefAzKey, 0.0);
+        AltitudeCalibrationDeg = Preferences.Default.Get(PrefAltKey, 0.0);
+    }
+
+    /// <summary>Stores a new azimuth/altitude offset and persists it.</summary>
+    public void SetCalibration(double azimuthOffsetDeg, double altitudeOffsetDeg)
+    {
+        AzimuthCalibrationDeg = NormalizeSignedDeg(azimuthOffsetDeg);
+        AltitudeCalibrationDeg = Math.Clamp(altitudeOffsetDeg, -45, 45);
+        Preferences.Default.Set(PrefAzKey, AzimuthCalibrationDeg);
+        Preferences.Default.Set(PrefAltKey, AltitudeCalibrationDeg);
+    }
+
+    public void ClearCalibration() => SetCalibration(0, 0);
+
+    /// <summary>Normalises an angle into (-180, 180].</summary>
+    private static double NormalizeSignedDeg(double deg)
+    {
+        double d = ((deg % 360) + 360) % 360;
+        if (d > 180) d -= 360;
+        return d;
+    }
 
     public void Start()
     {

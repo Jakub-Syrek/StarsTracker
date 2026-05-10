@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using Microsoft.Maui.Dispatching;
 using Microsoft.Maui.Graphics;
 using StarsTracker.Controls;
@@ -11,6 +12,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 {
     private readonly StarCatalogService _catalog;
     private readonly OrientationService _orientation;
+    private readonly LandmarkService _landmarks;
 
     // Camera horizontal FOV in degrees (typical smartphone)
     private const double FovH = 65.0;
@@ -40,6 +42,30 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _locationText = string.Empty;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasCalibration))]
+    private string _calibrationStatusText = string.Empty;
+
+    public bool HasCalibration => !string.IsNullOrEmpty(CalibrationStatusText);
+
+    [ObservableProperty]
+    private bool _isLandmarkPickerVisible;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AimInstructionText))]
+    [NotifyPropertyChangedFor(nameof(IsAimingMode))]
+    [NotifyPropertyChangedFor(nameof(IsNotAimingMode))]
+    private Landmark? _calibrationTarget;
+
+    public string AimInstructionText => CalibrationTarget is null
+        ? string.Empty
+        : $"Wyceluj krzyżyk na: {CalibrationTarget.Name}";
+
+    public bool IsAimingMode => CalibrationTarget is not null;
+    public bool IsNotAimingMode => CalibrationTarget is null;
+
+    public IReadOnlyList<Landmark> Landmarks => _landmarks.Landmarks;
+
     // The drawable that GraphicsView renders
     public StarOverlayDrawable StarDrawable { get; } = new();
 
@@ -51,11 +77,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private double _longitudeDeg;
     private bool _hasLocation;
 
-    public MainViewModel(StarCatalogService catalog, OrientationService orientation)
+    public MainViewModel(StarCatalogService catalog, OrientationService orientation, LandmarkService landmarks)
     {
         _catalog = catalog;
         _orientation = orientation;
+        _landmarks = landmarks;
         _orientation.OrientationChanged += OnOrientationChanged;
+        UpdateCalibrationStatusText();
     }
 
     public async Task InitializeAsync()
@@ -69,13 +97,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         StatusText = "Uruchamianie sensorów...";
         _orientation.Start();
 
-        // Refresh timer: 10 fps is smooth enough for a star tracker
         _refreshTimer = Application.Current!.Dispatcher.CreateTimer();
         _refreshTimer.Interval = TimeSpan.FromMilliseconds(100);
         _refreshTimer.Tick += (_, _) => Refresh();
         _refreshTimer.Start();
 
-        StatusText = string.Empty; // clears loading indicator
+        StatusText = string.Empty;
     }
 
     public void SetScreenSize(double width, double height)
@@ -102,11 +129,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         double cx = _screenWidth / 2.0;
         double cy = _screenHeight / 2.0;
 
-        // Pinhole camera focal length derived from horizontal FOV.
-        // Same focal length on both axes (square pixels).
         double focal = (_screenWidth / 2.0) / Math.Tan(FovH * Math.PI / 360.0);
 
-        // Pre-compute rotation matrix R(q) — rotates world (E,N,Up) to device (right,top,out-of-screen).
         bool useQuat = _orientation.HasQuaternion;
         double m00 = 1, m01 = 0, m02 = 0;
         double m10 = 0, m11 = 1, m12 = 0;
@@ -126,8 +150,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             m22 = 1 - 2 * (qx * qx + qy * qy);
         }
 
-        // Highlight radius in pixels: HighlightRadiusDeg → angle on screen
         double highlightPx = focal * Math.Tan(HighlightRadiusDeg * Math.PI / 180.0);
+
+        // Apply manual calibration offsets directly to the (az, alt) coordinates
+        // computed from the celestial catalog: this rotates the entire sky in the
+        // opposite direction so that the sensor's reported pointing matches reality.
+        double azCal = _orientation.AzimuthCalibrationDeg;
+        double altCal = _orientation.AltitudeCalibrationDeg;
 
         foreach (var star in _allStars)
         {
@@ -140,9 +169,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
             if (alt < -5.0) continue;
 
-            // World-frame unit vector for the star (East, North, Up)
-            double azRad = az * Math.PI / 180.0;
-            double altRad = alt * Math.PI / 180.0;
+            double azCorrected = az - azCal;
+            double altCorrected = alt - altCal;
+
+            double azRad = azCorrected * Math.PI / 180.0;
+            double altRad = altCorrected * Math.PI / 180.0;
             double cosAlt = Math.Cos(altRad);
             double wE = cosAlt * Math.Sin(azRad);
             double wN = cosAlt * Math.Cos(azRad);
@@ -151,38 +182,31 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             double dx, dy, dz;
             if (useQuat)
             {
-                // Rotate world → device frame
                 dx = m00 * wE + m01 * wN + m02 * wU;
                 dy = m10 * wE + m11 * wN + m12 * wU;
                 dz = m20 * wE + m21 * wN + m22 * wU;
             }
             else
             {
-                // Fallback: ignore roll. Synthesize device-frame vector from azimuth/altitude
-                // relative to device pointing direction (compass + accelerometer).
                 double devAz = _orientation.AzimuthDeg * Math.PI / 180.0;
                 double devAlt = _orientation.AltitudeDeg * Math.PI / 180.0;
-                double dEastRel  = wE * Math.Cos(devAz) - wN * Math.Sin(devAz);
+                double dEastRel = wE * Math.Cos(devAz) - wN * Math.Sin(devAz);
                 double dNorthRel = wE * Math.Sin(devAz) + wN * Math.Cos(devAz);
                 dx = dEastRel;
                 dy = wU * Math.Cos(devAlt) - dNorthRel * Math.Sin(devAlt);
                 dz = -(dNorthRel * Math.Cos(devAlt) + wU * Math.Sin(devAlt));
             }
 
-            // Camera looks along -Z in device frame; cull stars behind us
             if (dz >= 0) continue;
 
-            // Pinhole projection. Screen Y grows downward; device Y grows upward.
             double sx = cx + focal * (dx / -dz);
             double sy = cy - focal * (dy / -dz);
 
-            // Cull off-screen with small margin
             if (sx < -50 || sx > _screenWidth + 50) continue;
             if (sy < -50 || sy > _screenHeight + 50) continue;
 
             projected.Add((star, new PointF((float)sx, (float)sy)));
 
-            // Highlight star nearest to screen center
             double pxDist = Math.Sqrt((sx - cx) * (sx - cx) + (sy - cy) * (sy - cy));
             if (pxDist < highlightPx && pxDist < closestDist)
             {
@@ -197,6 +221,73 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         HighlightedStarName = highlighted?.Name ?? string.Empty;
 
         RedrawRequested?.Invoke();
+    }
+
+    // ---- Calibration ----
+
+    [RelayCommand]
+    private void ToggleLandmarkPicker()
+    {
+        if (CalibrationTarget is not null) return;
+        IsLandmarkPickerVisible = !IsLandmarkPickerVisible;
+    }
+
+    [RelayCommand]
+    private void SelectLandmark(Landmark landmark)
+    {
+        IsLandmarkPickerVisible = false;
+        CalibrationTarget = landmark;
+    }
+
+    [RelayCommand]
+    private void ConfirmCalibration()
+    {
+        if (CalibrationTarget is null || !_hasLocation) return;
+
+        double trueBearing = GeoMath.BearingDeg(
+            _latitudeDeg, _longitudeDeg,
+            CalibrationTarget.Latitude, CalibrationTarget.Longitude);
+
+        double trueElevation = GeoMath.ElevationAngleDeg(
+            _latitudeDeg, _longitudeDeg, observerElevationM: 0,
+            CalibrationTarget.Latitude, CalibrationTarget.Longitude,
+            CalibrationTarget.ElevationMeters);
+
+        double azOffset = trueBearing - _orientation.AzimuthDeg;
+        double altOffset = trueElevation - _orientation.AltitudeDeg;
+
+        _orientation.SetCalibration(azOffset, altOffset);
+
+        CalibrationTarget = null;
+        UpdateCalibrationStatusText();
+    }
+
+    [RelayCommand]
+    private void CancelCalibration()
+    {
+        CalibrationTarget = null;
+        IsLandmarkPickerVisible = false;
+    }
+
+    [RelayCommand]
+    private void ClearCalibration()
+    {
+        _orientation.ClearCalibration();
+        UpdateCalibrationStatusText();
+    }
+
+    private void UpdateCalibrationStatusText()
+    {
+        double az = _orientation.AzimuthCalibrationDeg;
+        double alt = _orientation.AltitudeCalibrationDeg;
+        if (Math.Abs(az) < 0.1 && Math.Abs(alt) < 0.1)
+        {
+            CalibrationStatusText = string.Empty;
+        }
+        else
+        {
+            CalibrationStatusText = $"Kalibracja: az {az:+0.0;-0.0;0}°  alt {alt:+0.0;-0.0;0}°";
+        }
     }
 
     // ---- Location ----
