@@ -120,19 +120,7 @@ public sealed class OrientationService : IDisposable
         QuatX = q.X; QuatY = q.Y; QuatZ = q.Z; QuatW = q.W;
         HasQuaternion = true;
 
-        // Per SensorManager.getRotationMatrixFromVector: R(q) rotates a vector
-        // from the device frame to the world frame (X=East, Y=North, Z=Up).
-        // Rear camera direction in device frame is (0, 0, -1), so its world-frame
-        // direction is R(q) * (0,0,-1) = -column_2(R) = (-m02, -m12, -m22).
-        double m02 = 2 * (q.X * q.Z + q.Y * q.W);
-        double m12 = 2 * (q.Y * q.Z - q.X * q.W);
-        double m22 = 1 - 2 * (q.X * q.X + q.Y * q.Y);
-
-        double vEast = -m02, vNorth = -m12, vUp = -m22;
-        double azRad = Math.Atan2(vEast, vNorth);
-        AzimuthDeg = (azRad * 180.0 / Math.PI + 360.0) % 360.0;
-        AltitudeDeg = Math.Asin(Math.Clamp(vUp, -1.0, 1.0)) * 180.0 / Math.PI;
-
+        (AzimuthDeg, AltitudeDeg) = OrientationMath.AzimuthAltitude(q.X, q.Y, q.Z, q.W);
         OrientationChanged?.Invoke();
     }
 

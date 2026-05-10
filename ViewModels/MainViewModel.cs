@@ -182,32 +182,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         double cx = _screenWidth / 2.0;
         double cy = _screenHeight / 2.0;
 
-        double focal = (_screenWidth / 2.0) / Math.Tan(FovH * Math.PI / 360.0);
-
-        bool useQuat = _orientation.HasQuaternion;
-        double m00 = 1, m01 = 0, m02 = 0;
-        double m10 = 0, m11 = 1, m12 = 0;
-        double m20 = 0, m21 = 0, m22 = 1;
-        if (useQuat)
-        {
-            double qx = _orientation.QuatX, qy = _orientation.QuatY,
-                   qz = _orientation.QuatZ, qw = _orientation.QuatW;
-            m00 = 1 - 2 * (qy * qy + qz * qz);
-            m01 = 2 * (qx * qy - qz * qw);
-            m02 = 2 * (qx * qz + qy * qw);
-            m10 = 2 * (qx * qy + qz * qw);
-            m11 = 1 - 2 * (qx * qx + qz * qz);
-            m12 = 2 * (qy * qz - qx * qw);
-            m20 = 2 * (qx * qz - qy * qw);
-            m21 = 2 * (qy * qz + qx * qw);
-            m22 = 1 - 2 * (qx * qx + qy * qy);
-        }
-
+        double focal = ProjectionMath.FocalLengthPx(_screenWidth, FovH);
         double highlightPx = focal * Math.Tan(HighlightRadiusDeg * Math.PI / 180.0);
 
-        // Apply manual calibration offsets directly to the (az, alt) coordinates
-        // computed from the celestial catalog: this rotates the entire sky in the
-        // opposite direction so that the sensor's reported pointing matches reality.
+        bool useQuat = _orientation.HasQuaternion;
+        double[]? r = useQuat
+            ? OrientationMath.RotationMatrix(
+                _orientation.QuatX, _orientation.QuatY,
+                _orientation.QuatZ, _orientation.QuatW)
+            : null;
+
         double azCal = _orientation.AzimuthCalibrationDeg;
         double altCal = _orientation.AltitudeCalibrationDeg;
 
@@ -222,26 +206,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
             if (alt < -5.0) continue;
 
-            double azCorrected = az - azCal;
-            double altCorrected = alt - altCal;
-
-            double azRad = azCorrected * Math.PI / 180.0;
-            double altRad = altCorrected * Math.PI / 180.0;
-            double cosAlt = Math.Cos(altRad);
-            double wE = cosAlt * Math.Sin(azRad);
-            double wN = cosAlt * Math.Cos(azRad);
-            double wU = Math.Sin(altRad);
+            var (wE, wN, wU) = ProjectionMath.AzAltToWorldVector(az - azCal, alt - altCal);
 
             double dx, dy, dz;
             if (useQuat)
             {
-                // R(q) rotates device → world (Android sensor convention), so the
-                // world → device transform we need here is R(q)^T = transpose.
-                // Multiplying by R^T means using R's columns as rows: the j-th
-                // device component is the dot product of column_j(R) with v_world.
-                dx = m00 * wE + m10 * wN + m20 * wU;
-                dy = m01 * wE + m11 * wN + m21 * wU;
-                dz = m02 * wE + m12 * wN + m22 * wU;
+                (dx, dy, dz) = OrientationMath.WorldToDevice(r!, wE, wN, wU);
             }
             else
             {
@@ -254,10 +224,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 dz = -(dNorthRel * Math.Cos(devAlt) + wU * Math.Sin(devAlt));
             }
 
-            if (dz >= 0) continue;
-
-            double sx = cx + focal * (dx / -dz);
-            double sy = cy - focal * (dy / -dz);
+            var screen = ProjectionMath.Project(dx, dy, dz, cx, cy, focal);
+            if (screen is null) continue;
+            double sx = screen.Value.sx, sy = screen.Value.sy;
 
             if (sx < -50 || sx > _screenWidth + 50) continue;
             if (sy < -50 || sy > _screenHeight + 50) continue;

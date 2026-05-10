@@ -1,3 +1,5 @@
 <Solution>
+  <Project Path="StarsTracker.Core/StarsTracker.Core.csproj" />
   <Project Path="StarsTracker.csproj" />
+  <Project Path="StarsTracker.Tests/StarsTracker.Tests.csproj" />
 </Solution>

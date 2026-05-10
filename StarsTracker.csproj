@@ -40,6 +40,24 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<ProjectReference Include="StarsTracker.Core\StarsTracker.Core.csproj" />
+	</ItemGroup>
+
+	<!-- Don't double-compile the Core sub-project's files into the main app -->
+	<ItemGroup>
+		<Compile Remove="StarsTracker.Core\**" />
+		<None Remove="StarsTracker.Core\**" />
+		<EmbeddedResource Remove="StarsTracker.Core\**" />
+		<MauiXaml Remove="StarsTracker.Core\**" />
+		<MauiCss Remove="StarsTracker.Core\**" />
+		<Compile Remove="StarsTracker.Tests\**" />
+		<None Remove="StarsTracker.Tests\**" />
+		<EmbeddedResource Remove="StarsTracker.Tests\**" />
+		<MauiXaml Remove="StarsTracker.Tests\**" />
+		<MauiCss Remove="StarsTracker.Tests\**" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<PackageReference Include="Microsoft.Maui.Controls" Version="10.0.60" />
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
 		<PackageReference Include="CommunityToolkit.Maui" Version="14.1.1" />
