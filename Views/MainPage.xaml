@@ -145,7 +145,7 @@
             </VerticalStackLayout>
         </Border>
 
-        <!-- ⑧ Bottom toolbar with Calibrate / Reset buttons -->
+        <!-- ⑧ Bottom toolbar with Calibrate / Reset / Record buttons -->
         <HorizontalStackLayout HorizontalOptions="Center"
                                VerticalOptions="End"
                                Margin="0,0,0,12"
@@ -166,7 +166,39 @@
                     Padding="14,6"
                     FontSize="13"
                     IsVisible="{Binding HasCalibration}" />
+            <Button Text="{Binding RecordButtonText}"
+                    Command="{Binding ToggleRecordingCommand}"
+                    BackgroundColor="#622"
+                    TextColor="#FFCCCC"
+                    CornerRadius="18"
+                    Padding="18,6"
+                    FontSize="13" />
         </HorizontalStackLayout>
+
+        <!-- ⑨ REC indicator (top-right) while recording -->
+        <Border HorizontalOptions="End"
+                VerticalOptions="Start"
+                Margin="0,12,12,0"
+                BackgroundColor="#CCCC0000"
+                Padding="10,4"
+                StrokeThickness="0"
+                IsVisible="{Binding IsRecording}">
+            <Border.StrokeShape>
+                <RoundRectangle CornerRadius="10" />
+            </Border.StrokeShape>
+            <Label Text="● REC"
+                   TextColor="White"
+                   FontSize="12"
+                   FontAttributes="Bold" />
+        </Border>
+
+        <!-- ⑩ Recording status toast (bottom, transient — empty text = invisible visually) -->
+        <Label Text="{Binding RecordingStatusText}"
+               TextColor="#FFEE88"
+               FontSize="12"
+               HorizontalOptions="Center"
+               VerticalOptions="End"
+               Margin="0,0,0,52" />
 
     </Grid>
 

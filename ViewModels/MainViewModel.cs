@@ -49,6 +49,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public bool HasCalibration => !string.IsNullOrEmpty(CalibrationStatusText);
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(RecordButtonText))]
+    private bool _isRecording;
+
+    [ObservableProperty]
+    private string _recordingStatusText = string.Empty;
+
+    public string RecordButtonText => IsRecording ? "Stop" : "Nagraj";
+
+    [ObservableProperty]
     private bool _isLandmarkPickerVisible;
 
     [ObservableProperty]
@@ -84,6 +93,50 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _landmarks = landmarks;
         _orientation.OrientationChanged += OnOrientationChanged;
         UpdateCalibrationStatusText();
+
+        ScreenRecorder.Started += OnRecordingStarted;
+        ScreenRecorder.Stopped += OnRecordingStopped;
+        ScreenRecorder.Error += OnRecordingError;
+    }
+
+    private void OnRecordingStarted()
+    {
+        Application.Current?.Dispatcher.Dispatch(() =>
+        {
+            IsRecording = true;
+            RecordingStatusText = "● REC";
+        });
+    }
+
+    private void OnRecordingStopped(string? path)
+    {
+        Application.Current?.Dispatcher.Dispatch(() =>
+        {
+            IsRecording = false;
+            RecordingStatusText = path is null
+                ? string.Empty
+                : $"Zapisano: {System.IO.Path.GetFileName(path)}";
+        });
+    }
+
+    private void OnRecordingError(string message)
+    {
+        Application.Current?.Dispatcher.Dispatch(() =>
+        {
+            IsRecording = false;
+            RecordingStatusText = $"Błąd nagrywania: {message}";
+        });
+    }
+
+    [RelayCommand]
+    private void ToggleRecording()
+    {
+#if ANDROID
+        var act = Microsoft.Maui.ApplicationModel.Platform.CurrentActivity as StarsTracker.MainActivity;
+        if (act is null) return;
+        if (IsRecording) act.StopScreenRecording();
+        else act.StartScreenRecording();
+#endif
     }
 
     public async Task InitializeAsync()
@@ -182,9 +235,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             double dx, dy, dz;
             if (useQuat)
             {
-                dx = m00 * wE + m01 * wN + m02 * wU;
-                dy = m10 * wE + m11 * wN + m12 * wU;
-                dz = m20 * wE + m21 * wN + m22 * wU;
+                // R(q) rotates device → world (Android sensor convention), so the
+                // world → device transform we need here is R(q)^T = transpose.
+                // Multiplying by R^T means using R's columns as rows: the j-th
+                // device component is the dot product of column_j(R) with v_world.
+                dx = m00 * wE + m10 * wN + m20 * wU;
+                dy = m01 * wE + m11 * wN + m21 * wU;
+                dz = m02 * wE + m12 * wN + m22 * wU;
             }
             else
             {
