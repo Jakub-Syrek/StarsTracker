@@ -12,6 +12,7 @@
 
         <!-- ① Camera preview — fills entire screen -->
         <camera:CameraView x:Name="CameraView"
+                           BackgroundColor="#0A0A1A"
                            HorizontalOptions="Fill"
                            VerticalOptions="Fill" />
 
