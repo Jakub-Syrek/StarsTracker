@@ -1,12 +1,15 @@
-using StarsTracker.Views;
-
 namespace StarsTracker;
 
 public partial class App : Application
 {
-    public App(MainPage mainPage)
+    private readonly StarsTracker.Views.MainPage _mainPage;
+
+    public App(StarsTracker.Views.MainPage mainPage)
     {
         InitializeComponent();
-        MainPage = mainPage;
+        _mainPage = mainPage;
     }
+
+    protected override Window CreateWindow(IActivationState? activationState)
+        => new Window(_mainPage);
 }

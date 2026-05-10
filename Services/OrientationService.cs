@@ -13,6 +13,15 @@ public sealed class OrientationService : IDisposable
     public double AzimuthDeg { get; private set; }
     public double AltitudeDeg { get; private set; }
 
+    // Raw quaternion (X, Y, Z, W) — Android rotation-vector convention:
+    // rotates a vector from world frame (X=East, Y=North, Z=Up) to device frame
+    // (X=right edge, Y=top edge, Z=out of front screen).
+    public float QuatX { get; private set; }
+    public float QuatY { get; private set; }
+    public float QuatZ { get; private set; }
+    public float QuatW { get; private set; } = 1f;
+    public bool HasQuaternion { get; private set; }
+
     private bool _useOrientationSensor;
     private bool _disposed;
 
@@ -74,37 +83,22 @@ public sealed class OrientationService : IDisposable
     private void OnOrientationChanged(object? sender, OrientationSensorChangedEventArgs e)
     {
         var q = e.Reading.Orientation;
-        (AzimuthDeg, AltitudeDeg) = QuaternionToAzimuthAltitude(q.X, q.Y, q.Z, q.W);
+        QuatX = q.X; QuatY = q.Y; QuatZ = q.Z; QuatW = q.W;
+        HasQuaternion = true;
+
+        // Camera direction in device frame is (0, 0, -1). Apply R(q)^T to get world coords.
+        // R(q) rotates world->device, so R^T rotates device->world. Camera direction in
+        // world frame = R^T * (0,0,-1) = -row_2(R) = (-m20, -m21, -m22).
+        double m20 = 2 * (q.X * q.Z - q.Y * q.W);
+        double m21 = 2 * (q.Y * q.Z + q.X * q.W);
+        double m22 = 1 - 2 * (q.X * q.X + q.Y * q.Y);
+
+        double vEast = -m20, vNorth = -m21, vUp = -m22;
+        double azRad = Math.Atan2(vEast, vNorth);
+        AzimuthDeg = (azRad * 180.0 / Math.PI + 360.0) % 360.0;
+        AltitudeDeg = Math.Asin(Math.Clamp(vUp, -1.0, 1.0)) * 180.0 / Math.PI;
+
         OrientationChanged?.Invoke();
-    }
-
-    /// <summary>
-    /// Converts device orientation quaternion to azimuth (compass) and altitude (pitch).
-    /// Assumes portrait mode, camera pointing out the back.
-    /// </summary>
-    private static (double azimuth, double altitude) QuaternionToAzimuthAltitude(
-        float x, float y, float z, float w)
-    {
-        // Rotation matrix from quaternion
-        double m00 = 1 - 2 * (y * y + z * z);
-        double m01 = 2 * (x * y - z * w);
-        double m10 = 2 * (x * y + z * w);
-        double m11 = 1 - 2 * (x * x + z * z);
-        double m20 = 2 * (x * z + y * w);
-        double m21 = 2 * (y * z - x * w);
-        double m22 = 1 - 2 * (x * x + y * y);
-
-        // Azimuth: bearing of the phone's "up" direction projected onto horizontal plane
-        double azimuthRad = Math.Atan2(m01, m00); // yaw
-        double azimuthDeg = azimuthRad * 180.0 / Math.PI;
-        if (azimuthDeg < 0) azimuthDeg += 360.0;
-
-        // Altitude: pitch of the camera (0 = horizontal, 90 = pointing straight up)
-        // When camera points to sky, pitch is ~90; when at horizon, ~0.
-        double altitudeRad = Math.Asin(Math.Clamp(m21, -1.0, 1.0));
-        double altitudeDeg = altitudeRad * 180.0 / Math.PI;
-
-        return (azimuthDeg, altitudeDeg);
     }
 
     // --- Fallback: compass + accelerometer ---

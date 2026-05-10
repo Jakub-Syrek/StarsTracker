@@ -8,7 +8,7 @@
 		<SingleProject>true</SingleProject>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
-		<MauiXamlInflator>SourceGen</MauiXamlInflator>
+		<!-- MauiXamlInflator=SourceGen removed: using default runtime inflation -->
 
 		<!-- App metadata -->
 		<ApplicationTitle>StarsTracker</ApplicationTitle>
