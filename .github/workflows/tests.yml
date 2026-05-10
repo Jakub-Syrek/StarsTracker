@@ -1,0 +1,89 @@
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    name: Build & Test (StarsTracker.Core / StarsTracker.Tests)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore StarsTracker.Tests/StarsTracker.Tests.csproj
+
+      - name: Build (Release)
+        run: dotnet build StarsTracker.Tests/StarsTracker.Tests.csproj -c Release --no-restore
+
+      - name: Test
+        run: dotnet test StarsTracker.Tests/StarsTracker.Tests.csproj -c Release --no-build --logger "console;verbosity=normal" --collect:"XPlat Code Coverage"
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: code-coverage
+          path: '**/TestResults/**/coverage.cobertura.xml'
+
+  code-quality:
+    name: Code Quality (authorship + Polish-string check)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 50
+
+      - name: Verify commit authorship (Jakub Syrek only)
+        shell: bash
+        run: |
+          # Pull-request commits range
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            range="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+          else
+            range="HEAD~5..HEAD"
+          fi
+
+          bad_authors=$(git log "$range" --pretty=format:'%an <%ae>' | sort -u | grep -v '^Jakub Syrek <jakubvonsyrek@gmail.com>$' || true)
+          if [ -n "$bad_authors" ]; then
+            echo "::error::Unexpected commit authors detected — only 'Jakub Syrek <jakubvonsyrek@gmail.com>' is allowed:"
+            echo "$bad_authors"
+            exit 1
+          fi
+
+          # Reject any AI co-author trailer
+          if git log "$range" --pretty=format:'%B' | grep -iE '^Co-Authored-By:.*(Claude|GPT|Copilot|noreply@anthropic\.com)' ; then
+            echo "::error::AI co-author trailers are forbidden by project policy."
+            exit 1
+          fi
+
+      - name: Reject Polish copy in source code (toponyms allowed)
+        shell: bash
+        run: |
+          # Search staged source for non-allow-listed Polish words/diacritics.
+          # Toponyms in LandmarkService.cs and Polish references in tests are allow-listed.
+          allow='LandmarkService.cs|LandmarkServiceTests.cs|README.md|ABOUT.md|SECURITY.md|CHANGELOG.md'
+          violations=$(grep -RInE '(Inicjalizacja|Ładowanie|Pobieranie|Uruchamianie|Brak|Wyceluj|Anuluj|Zatwierdź|Kalibruj|Zeruj|Nagraj|Wybierz|Trzymaj|Nagrywanie|Użytkownik|Zapisano|Błąd|Pokazywane)' \
+            --include='*.cs' --include='*.xaml' --exclude-dir=obj --exclude-dir=bin . \
+            | grep -vE "$allow" || true)
+          if [ -n "$violations" ]; then
+            echo "::error::Polish strings found in source — directive requires English-only:"
+            echo "$violations"
+            exit 1
+          fi

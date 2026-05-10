@@ -1,0 +1,121 @@
+name: Version & Release
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    name: Auto-bump version & create GitHub Release
+    runs-on: ubuntu-latest
+    if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
+
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Determine bump from commits
+        id: bump
+        shell: bash
+        run: |
+          # Find the last semver tag, default to v0.0.0 if none.
+          last_tag=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo "v0.0.0")
+          echo "last_tag=$last_tag" >> "$GITHUB_OUTPUT"
+
+          range="$last_tag..HEAD"
+          if [ "$last_tag" = "v0.0.0" ]; then
+            range="HEAD"
+          fi
+
+          messages=$(git log "$range" --pretty=format:'%s%n%b' || true)
+
+          bump="patch"
+          if echo "$messages" | grep -qE '^BREAKING CHANGE:|!:'; then
+            bump="major"
+          elif echo "$messages" | grep -qE '^feat(\([^)]+\))?:'; then
+            bump="minor"
+          elif echo "$messages" | grep -qE '^(fix|docs|test|refactor|perf|chore|ci|security)(\([^)]+\))?:'; then
+            bump="patch"
+          else
+            echo "No conventional commits found since $last_tag — skipping release."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "bump=$bump" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Compute next version
+        id: next
+        if: steps.bump.outputs.skip != 'true'
+        shell: bash
+        run: |
+          last="${{ steps.bump.outputs.last_tag }}"
+          last_clean="${last#v}"
+          IFS='.' read -r major minor patch <<< "$last_clean"
+          case "${{ steps.bump.outputs.bump }}" in
+            major) major=$((major+1)); minor=0; patch=0 ;;
+            minor) minor=$((minor+1)); patch=0 ;;
+            patch) patch=$((patch+1)) ;;
+          esac
+          next="$major.$minor.$patch"
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+          echo "tag=v$next" >> "$GITHUB_OUTPUT"
+
+      - name: Update version in csproj files
+        if: steps.bump.outputs.skip != 'true'
+        shell: bash
+        run: |
+          v="${{ steps.next.outputs.version }}"
+          for csproj in StarsTracker.csproj StarsTracker.Core/StarsTracker.Core.csproj; do
+            sed -ri "s|<Version>[0-9]+\.[0-9]+\.[0-9]+</Version>|<Version>$v</Version>|" "$csproj"
+            sed -ri "s|<AssemblyVersion>[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+</AssemblyVersion>|<AssemblyVersion>$v.0</AssemblyVersion>|" "$csproj"
+            sed -ri "s|<FileVersion>[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+</FileVersion>|<FileVersion>$v.0</FileVersion>|" "$csproj"
+            sed -ri "s|<InformationalVersion>[0-9]+\.[0-9]+\.[0-9]+</InformationalVersion>|<InformationalVersion>$v</InformationalVersion>|" "$csproj"
+          done
+
+      - name: Commit, tag and push
+        if: steps.bump.outputs.skip != 'true'
+        shell: bash
+        run: |
+          git config user.name  "Jakub Syrek"
+          git config user.email "jakubvonsyrek@gmail.com"
+          git add StarsTracker.csproj StarsTracker.Core/StarsTracker.Core.csproj
+          git commit -m "chore(release): ${{ steps.next.outputs.version }}"
+          git tag "${{ steps.next.outputs.tag }}"
+          git push origin master --tags
+
+      - name: Build release notes from commits
+        if: steps.bump.outputs.skip != 'true'
+        id: notes
+        shell: bash
+        run: |
+          range="${{ steps.bump.outputs.last_tag }}..HEAD~1"
+          if [ "${{ steps.bump.outputs.last_tag }}" = "v0.0.0" ]; then
+            range="HEAD~1"
+          fi
+          {
+            echo "notes<<EOF"
+            git log "$range" --pretty=format:'- %s'
+            echo
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        if: steps.bump.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.next.outputs.tag }}
+          name: ${{ steps.next.outputs.tag }}
+          body: ${{ steps.notes.outputs.notes }}
+          token: ${{ secrets.GITHUB_TOKEN }}
