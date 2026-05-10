@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:camera="clr-namespace:CommunityToolkit.Maui.Views;assembly=CommunityToolkit.Maui.Camera"
+             xmlns:vm="clr-namespace:StarsTracker.ViewModels"
+             x:Class="StarsTracker.Views.MainPage"
+             x:DataType="vm:MainViewModel"
+             Shell.NavBarIsVisible="False"
+             BackgroundColor="Black">
+
+    <Grid>
+
+        <!-- ① Camera preview — fills entire screen -->
+        <camera:CameraView x:Name="CameraView"
+                           HorizontalOptions="Fill"
+                           VerticalOptions="Fill" />
+
+        <!-- ② Star overlay — transparent, drawn on top of camera -->
+        <GraphicsView x:Name="StarOverlay"
+                      Drawable="{Binding StarDrawable}"
+                      BackgroundColor="Transparent"
+                      HorizontalOptions="Fill"
+                      VerticalOptions="Fill"
+                      SizeChanged="OnOverlaySizeChanged" />
+
+        <!-- ③ Semi-transparent top bar: location info -->
+        <Border HorizontalOptions="Fill"
+                VerticalOptions="Start"
+                BackgroundColor="#66000000"
+                Padding="16,8"
+                StrokeThickness="0">
+            <Label Text="{Binding LocationText}"
+                   TextColor="#AACCE0"
+                   FontSize="12"
+                   HorizontalOptions="Start" />
+        </Border>
+
+        <!-- ④ Status text while initialising -->
+        <Label Text="{Binding StatusText}"
+               TextColor="White"
+               FontSize="14"
+               HorizontalOptions="Center"
+               VerticalOptions="Center"
+               IsVisible="{Binding IsLoading}" />
+
+        <!-- ⑤ Highlighted star name — bottom of screen -->
+        <Border HorizontalOptions="Center"
+                VerticalOptions="End"
+                Margin="0,0,0,60"
+                BackgroundColor="#88000000"
+                Padding="20,10"
+                StrokeThickness="0"
+                IsVisible="{Binding HasHighlightedStar}">
+            <Border.StrokeShape>
+                <RoundRectangle CornerRadius="20" />
+            </Border.StrokeShape>
+            <Label Text="{Binding HighlightedStarName}"
+                   TextColor="Yellow"
+                   FontSize="22"
+                   FontAttributes="Bold"
+                   HorizontalOptions="Center" />
+        </Border>
+
+    </Grid>
+
+</ContentPage>

@@ -1,0 +1,23 @@
+## .NET / C#
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.cache
+_ReSharper*/
+
+## MAUI / Android
+*.apk
+*.aab
+*.ipa
+*.keystore
+
+## NuGet
+packages/
+*.nupkg
+
+## OS
+.DS_Store
+Thumbs.db
+desktop.ini
