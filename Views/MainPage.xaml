@@ -1,20 +1,18 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             xmlns:camera="clr-namespace:CommunityToolkit.Maui.Views;assembly=CommunityToolkit.Maui.Camera"
              xmlns:vm="clr-namespace:StarsTracker.ViewModels"
              x:Class="StarsTracker.Views.MainPage"
              x:DataType="vm:MainViewModel"
              Shell.NavBarIsVisible="False"
-             BackgroundColor="Black">
+             BackgroundColor="Transparent">
 
     <Grid>
 
-        <!-- ① Camera preview — fills entire screen -->
-        <camera:CameraView x:Name="CameraView"
-                           BackgroundColor="#0A0A1A"
-                           HorizontalOptions="Fill"
-                           VerticalOptions="Fill" />
+        <!-- ① Camera preview host — native Android PreviewView injected here -->
+        <ContentView x:Name="CameraHost"
+                     HorizontalOptions="Fill"
+                     VerticalOptions="Fill" />
 
         <!-- ② Star overlay — transparent, drawn on top of camera -->
         <GraphicsView x:Name="StarOverlay"

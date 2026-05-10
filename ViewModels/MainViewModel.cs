@@ -91,51 +91,102 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private void Refresh()
     {
         if (!_hasLocation) return;
+        if (_screenWidth < 2 || _screenHeight < 2) return;
 
-        double deviceAz = _orientation.AzimuthDeg;
-        double deviceAlt = _orientation.AltitudeDeg;
         var utcNow = DateTime.UtcNow;
 
         var projected = new List<(Star, PointF)>();
         Star? highlighted = null;
         double closestDist = double.MaxValue;
 
-        double fovV = FovH * (_screenHeight / _screenWidth);
-        double pxPerDegH = _screenWidth / FovH;
-        double pxPerDegV = _screenHeight / fovV;
         double cx = _screenWidth / 2.0;
         double cy = _screenHeight / 2.0;
 
+        // Pinhole camera focal length derived from horizontal FOV.
+        // Same focal length on both axes (square pixels).
+        double focal = (_screenWidth / 2.0) / Math.Tan(FovH * Math.PI / 360.0);
+
+        // Pre-compute rotation matrix R(q) — rotates world (E,N,Up) to device (right,top,out-of-screen).
+        bool useQuat = _orientation.HasQuaternion;
+        double m00 = 1, m01 = 0, m02 = 0;
+        double m10 = 0, m11 = 1, m12 = 0;
+        double m20 = 0, m21 = 0, m22 = 1;
+        if (useQuat)
+        {
+            double qx = _orientation.QuatX, qy = _orientation.QuatY,
+                   qz = _orientation.QuatZ, qw = _orientation.QuatW;
+            m00 = 1 - 2 * (qy * qy + qz * qz);
+            m01 = 2 * (qx * qy - qz * qw);
+            m02 = 2 * (qx * qz + qy * qw);
+            m10 = 2 * (qx * qy + qz * qw);
+            m11 = 1 - 2 * (qx * qx + qz * qz);
+            m12 = 2 * (qy * qz - qx * qw);
+            m20 = 2 * (qx * qz - qy * qw);
+            m21 = 2 * (qy * qz + qx * qw);
+            m22 = 1 - 2 * (qx * qx + qy * qy);
+        }
+
+        // Highlight radius in pixels: HighlightRadiusDeg → angle on screen
+        double highlightPx = focal * Math.Tan(HighlightRadiusDeg * Math.PI / 180.0);
+
         foreach (var star in _allStars)
         {
-            double raDeg = star.RA * 15.0; // hours → degrees
+            double raDeg = star.RA * 15.0;
             AstronomyService.EquatorialToHorizontal(
                 raDeg, star.Dec,
                 _latitudeDeg, _longitudeDeg,
                 utcNow,
                 out double az, out double alt);
 
-            // Only show stars above horizon
             if (alt < -5.0) continue;
 
-            // Angular offset from device pointing direction
-            double dAz = DeltaAngle(az, deviceAz);
-            double dAlt = alt - deviceAlt;
+            // World-frame unit vector for the star (East, North, Up)
+            double azRad = az * Math.PI / 180.0;
+            double altRad = alt * Math.PI / 180.0;
+            double cosAlt = Math.Cos(altRad);
+            double wE = cosAlt * Math.Sin(azRad);
+            double wN = cosAlt * Math.Cos(azRad);
+            double wU = Math.Sin(altRad);
 
-            // Cull stars outside FOV (+30% margin for labels near edge)
-            if (Math.Abs(dAz) > FovH * 0.8) continue;
-            if (Math.Abs(dAlt) > fovV * 0.8) continue;
-
-            float sx = (float)(cx + dAz * pxPerDegH);
-            float sy = (float)(cy - dAlt * pxPerDegV); // screen Y increases downward
-
-            projected.Add((star, new PointF(sx, sy)));
-
-            // Track closest to crosshair for highlighting
-            double dist = Math.Sqrt(dAz * dAz + dAlt * dAlt);
-            if (dist < HighlightRadiusDeg && dist < closestDist)
+            double dx, dy, dz;
+            if (useQuat)
             {
-                closestDist = dist;
+                // Rotate world → device frame
+                dx = m00 * wE + m01 * wN + m02 * wU;
+                dy = m10 * wE + m11 * wN + m12 * wU;
+                dz = m20 * wE + m21 * wN + m22 * wU;
+            }
+            else
+            {
+                // Fallback: ignore roll. Synthesize device-frame vector from azimuth/altitude
+                // relative to device pointing direction (compass + accelerometer).
+                double devAz = _orientation.AzimuthDeg * Math.PI / 180.0;
+                double devAlt = _orientation.AltitudeDeg * Math.PI / 180.0;
+                double dEastRel  = wE * Math.Cos(devAz) - wN * Math.Sin(devAz);
+                double dNorthRel = wE * Math.Sin(devAz) + wN * Math.Cos(devAz);
+                dx = dEastRel;
+                dy = wU * Math.Cos(devAlt) - dNorthRel * Math.Sin(devAlt);
+                dz = -(dNorthRel * Math.Cos(devAlt) + wU * Math.Sin(devAlt));
+            }
+
+            // Camera looks along -Z in device frame; cull stars behind us
+            if (dz >= 0) continue;
+
+            // Pinhole projection. Screen Y grows downward; device Y grows upward.
+            double sx = cx + focal * (dx / -dz);
+            double sy = cy - focal * (dy / -dz);
+
+            // Cull off-screen with small margin
+            if (sx < -50 || sx > _screenWidth + 50) continue;
+            if (sy < -50 || sy > _screenHeight + 50) continue;
+
+            projected.Add((star, new PointF((float)sx, (float)sy)));
+
+            // Highlight star nearest to screen center
+            double pxDist = Math.Sqrt((sx - cx) * (sx - cx) + (sy - cy) * (sy - cy));
+            if (pxDist < highlightPx && pxDist < closestDist)
+            {
+                closestDist = pxDist;
                 highlighted = star;
             }
         }
@@ -193,17 +244,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             _longitudeDeg = 21.012229;
             _hasLocation = true;
         }
-    }
-
-    // ---- Helpers ----
-
-    /// <summary>Shortest signed angle from a to b, in range (-180, 180].</summary>
-    private static double DeltaAngle(double a, double b)
-    {
-        double d = a - b;
-        while (d > 180) d -= 360;
-        while (d < -180) d += 360;
-        return d;
     }
 
     public void Dispose()
