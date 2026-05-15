@@ -322,16 +322,23 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         return lines;
     }
 
+    /// <summary>
+    /// Per-body rendering style. Radii are intentionally exaggerated — the
+    /// real angular diameter of the Sun and Moon is only ~0.5°, which on a
+    /// 75°-FOV phone screen amounts to ~7 px. We blow that up so the bodies
+    /// are immediately recognisable in the AR overlay rather than getting
+    /// lost among the background stars.
+    /// </summary>
     private static (Color color, float radius) PlanetStyle(string name) => name switch
     {
-        "Sun"     => (Color.FromArgb("#FFD24A"), 14f),
-        "Moon"    => (Color.FromArgb("#E5E5F0"), 14f),
-        "Mercury" => (Color.FromArgb("#C8B98C"),  5f),
-        "Venus"   => (Color.FromArgb("#F4E8C8"),  7f),
-        "Mars"    => (Color.FromArgb("#E07050"),  6f),
-        "Jupiter" => (Color.FromArgb("#E5C284"),  8f),
-        "Saturn"  => (Color.FromArgb("#E2D294"),  7f),
-        _         => (Colors.White,               5f),
+        "Sun"     => (Color.FromArgb("#FFD24A"), 38f),
+        "Moon"    => (Color.FromArgb("#EDEDF5"), 32f),
+        "Mercury" => (Color.FromArgb("#C8B98C"), 12f),
+        "Venus"   => (Color.FromArgb("#F4E8C8"), 18f),
+        "Mars"    => (Color.FromArgb("#E07050"), 16f),
+        "Jupiter" => (Color.FromArgb("#E5C284"), 22f),
+        "Saturn"  => (Color.FromArgb("#E2D294"), 20f),
+        _         => (Colors.White,              10f),
     };
 
     /// <summary>

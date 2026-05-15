@@ -83,13 +83,19 @@ public sealed class StarOverlayDrawable : IDrawable
     private void DrawConstellations(ICanvas canvas)
     {
         if (_constellationLines.Count == 0) return;
-        // Soft cyan-blue, low alpha so it never overpowers the stars themselves.
-        canvas.StrokeColor = Color.FromRgba(140, 200, 255, 90);
-        canvas.StrokeSize = 1.2f;
+
+        // Two-pass draw so the lines pop over the camera feed:
+        //   1. wide soft glow underlay
+        //   2. crisp bright cyan core
+        canvas.StrokeColor = Color.FromRgba(120, 200, 255, 80);
+        canvas.StrokeSize = 4.0f;
         foreach (var (from, to) in _constellationLines)
-        {
             canvas.DrawLine(from.X, from.Y, to.X, to.Y);
-        }
+
+        canvas.StrokeColor = Color.FromRgba(180, 230, 255, 230);
+        canvas.StrokeSize = 1.8f;
+        foreach (var (from, to) in _constellationLines)
+            canvas.DrawLine(from.X, from.Y, to.X, to.Y);
     }
 
     private static void DrawStar(ICanvas canvas, Star star, PointF pos, bool highlighted, double timePhase)
@@ -162,17 +168,41 @@ public sealed class StarOverlayDrawable : IDrawable
 
     private static void DrawPlanet(ICanvas canvas, ProjectedPlanet planet)
     {
-        // Outer soft halo — 3 concentric circles with decaying alpha.
+        // Outer soft halo — 5 concentric circles with decaying alpha. For the
+        // Sun the halo extends much further so it actually looks radiant.
+        bool isSun = planet.Name == "Sun";
+        float haloMax = isSun ? planet.Radius * 1.4f : 14f;
+
+        canvas.FillColor = planet.Color.WithAlpha(0.06f);
+        canvas.FillCircle(planet.Position.X, planet.Position.Y, planet.Radius + haloMax);
         canvas.FillColor = planet.Color.WithAlpha(0.10f);
-        canvas.FillCircle(planet.Position.X, planet.Position.Y, planet.Radius + 14);
-        canvas.FillColor = planet.Color.WithAlpha(0.22f);
-        canvas.FillCircle(planet.Position.X, planet.Position.Y, planet.Radius + 8);
-        canvas.FillColor = planet.Color.WithAlpha(0.45f);
-        canvas.FillCircle(planet.Position.X, planet.Position.Y, planet.Radius + 4);
+        canvas.FillCircle(planet.Position.X, planet.Position.Y, planet.Radius + haloMax * 0.66f);
+        canvas.FillColor = planet.Color.WithAlpha(0.20f);
+        canvas.FillCircle(planet.Position.X, planet.Position.Y, planet.Radius + haloMax * 0.40f);
+        canvas.FillColor = planet.Color.WithAlpha(0.38f);
+        canvas.FillCircle(planet.Position.X, planet.Position.Y, planet.Radius + haloMax * 0.20f);
+        canvas.FillColor = planet.Color.WithAlpha(0.65f);
+        canvas.FillCircle(planet.Position.X, planet.Position.Y, planet.Radius + 3);
 
         // Solid disc.
         canvas.FillColor = planet.Color;
         canvas.FillCircle(planet.Position.X, planet.Position.Y, planet.Radius);
+
+        // Sun + Moon get a subtle limb highlight to feel 3D.
+        if (isSun)
+        {
+            canvas.FillColor = Color.FromRgba(255, 255, 220, 200);
+            canvas.FillCircle(planet.Position.X, planet.Position.Y, planet.Radius * 0.55f);
+        }
+        else if (planet.Name == "Moon")
+        {
+            // Slightly off-centre highlight so it looks lit from one side.
+            canvas.FillColor = Color.FromRgba(255, 255, 255, 160);
+            canvas.FillCircle(
+                planet.Position.X - planet.Radius * 0.25f,
+                planet.Position.Y - planet.Radius * 0.25f,
+                planet.Radius * 0.55f);
+        }
 
         // Saturn gets its rings.
         if (planet.Name == "Saturn")
