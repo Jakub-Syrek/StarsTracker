@@ -51,27 +51,39 @@ public sealed class SkyServerClient
     {
         if (TryReadCache<PlanetsResponse>(_planetCachePath, PlanetCacheTtl, out var fresh))
         {
+            Log($"planets: cache hit ({fresh!.Bodies.Count} bodies)");
             return fresh!.Bodies;
         }
 
         try
         {
             string url = $"/api/v1/planets?utc={utc:O}";
+            Log($"planets: GET {_http.BaseAddress}{url.TrimStart('/')}");
             var response = await _http.GetFromJsonAsync<PlanetsResponse>(url, ct);
             if (response is not null)
             {
                 WriteCache(_planetCachePath, response);
+                Log($"planets: OK ({response.Bodies.Count} bodies)");
                 return response.Bodies;
             }
+            Log("planets: null response body");
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            // Network problem — fall back to stale cache below.
+            Log($"planets: network error — {ex.GetType().Name}: {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            Log($"planets: unexpected error — {ex.GetType().Name}: {ex.Message}");
         }
 
-        return TryReadCache<PlanetsResponse>(_planetCachePath, TimeSpan.MaxValue, out var stale)
-            ? stale!.Bodies
-            : null;
+        if (TryReadCache<PlanetsResponse>(_planetCachePath, TimeSpan.MaxValue, out var stale))
+        {
+            Log($"planets: stale cache ({stale!.Bodies.Count} bodies)");
+            return stale!.Bodies;
+        }
+        Log("planets: no data");
+        return null;
     }
 
     /// <summary>
@@ -82,25 +94,45 @@ public sealed class SkyServerClient
     {
         if (TryReadCache<List<ConstellationDto>>(_constellationCachePath, ConstellationCacheTtl, out var fresh))
         {
+            Log($"constellations: cache hit ({fresh!.Count})");
             return fresh!;
         }
 
         try
         {
+            Log($"constellations: GET {_http.BaseAddress}api/v1/constellations");
             var response = await _http.GetFromJsonAsync<List<ConstellationDto>>("/api/v1/constellations", ct);
             if (response is not null)
             {
                 WriteCache(_constellationCachePath, response);
+                Log($"constellations: OK ({response.Count})");
                 return response;
             }
+            Log("constellations: null response body");
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
+            Log($"constellations: network error — {ex.GetType().Name}: {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            Log($"constellations: unexpected error — {ex.GetType().Name}: {ex.Message}");
         }
 
-        return TryReadCache<List<ConstellationDto>>(_constellationCachePath, TimeSpan.MaxValue, out var stale)
-            ? stale!
-            : null;
+        if (TryReadCache<List<ConstellationDto>>(_constellationCachePath, TimeSpan.MaxValue, out var stale))
+        {
+            Log($"constellations: stale cache ({stale!.Count})");
+            return stale!;
+        }
+        Log("constellations: no data");
+        return null;
+    }
+
+    private static void Log(string msg)
+    {
+#if ANDROID
+        Android.Util.Log.Debug("StarsTracker", $"SkyServer {msg}");
+#endif
     }
 
     private static bool TryReadCache<T>(string path, TimeSpan ttl, out T? value)

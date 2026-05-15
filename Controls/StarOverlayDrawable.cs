@@ -7,12 +7,18 @@ namespace StarsTracker.Controls;
 /// IDrawable that renders a star field overlay on top of the camera feed.
 /// Stars are projected from horizontal coordinates (Az/Alt) to screen pixels
 /// based on the device's current pointing direction and estimated camera FOV.
+///
+/// Visual goodies:
+/// - Twinkle: bright stars (mag &lt; 3) pulse softly using a per-star phase
+///   so the field has life instead of being static dots.
+/// - Glow halos: brighter stars get bigger, softer halo rings.
+/// - Magnitude-tinted colour: a coarse white-to-pale-blue gradient by
+///   brightness — gives the field the cool nebular feel without needing
+///   per-star spectral type from HYG.
+/// - Planet halos with a chunky soft-glow ring; Saturn renders with rings.
 /// </summary>
 public sealed class StarOverlayDrawable : IDrawable
 {
-    // Camera horizontal field of view in degrees (typical smartphone rear camera)
-    private const double FovHorizontalDeg = 65.0;
-
     // Stars + their computed screen positions (updated by ViewModel each frame)
     private IReadOnlyList<(Star Star, PointF Position)> _projectedStars = [];
     private IReadOnlyList<ProjectedPlanet> _projectedPlanets = [];
@@ -54,10 +60,13 @@ public sealed class StarOverlayDrawable : IDrawable
         // Constellation lines first so star dots draw on top.
         DrawConstellations(canvas);
 
+        // Time phase for twinkle (cycles every ~6 seconds).
+        double timePhase = (Environment.TickCount % 6000) / 6000.0 * 2 * Math.PI;
+
         foreach (var (star, pos) in _projectedStars)
         {
             bool isHighlighted = star == _highlighted;
-            DrawStar(canvas, star, pos, isHighlighted);
+            DrawStar(canvas, star, pos, isHighlighted, timePhase);
         }
 
         // Planets above stars so they're never occluded by faint background dots.
@@ -74,26 +83,112 @@ public sealed class StarOverlayDrawable : IDrawable
     private void DrawConstellations(ICanvas canvas)
     {
         if (_constellationLines.Count == 0) return;
-        canvas.StrokeColor = Color.FromRgba(140, 170, 220, 70);
-        canvas.StrokeSize = 1.0f;
+        // Soft cyan-blue, low alpha so it never overpowers the stars themselves.
+        canvas.StrokeColor = Color.FromRgba(140, 200, 255, 90);
+        canvas.StrokeSize = 1.2f;
         foreach (var (from, to) in _constellationLines)
         {
             canvas.DrawLine(from.X, from.Y, to.X, to.Y);
         }
     }
 
+    private static void DrawStar(ICanvas canvas, Star star, PointF pos, bool highlighted, double timePhase)
+    {
+        float baseRadius = StarRadius(star.Magnitude);
+
+        // Twinkle: bright stars (mag < 3) modulate ±25% on a per-star phase.
+        float scale = 1f;
+        if (star.Magnitude < 3.0)
+        {
+            // Deterministic per-star phase offset (so each twinkles differently).
+            double starPhase = (star.Id * 17 % 100) / 100.0 * 2 * Math.PI;
+            scale = (float)(1.0 + 0.25 * Math.Sin(timePhase + starPhase));
+        }
+        float radius = baseRadius * scale;
+
+        // Magnitude-tinted colour: very bright stars stay warm-white, faint
+        // dots drift towards pale blue, evoking a slight Rayleigh shift.
+        Color body = highlighted ? Colors.Yellow : TintByMagnitude(star.Magnitude);
+
+        // Layered halo for bright stars: outer soft ring + inner crisp dot.
+        if (star.Magnitude < 1.5)
+        {
+            canvas.FillColor = body.WithAlpha(0.18f);
+            canvas.FillCircle(pos.X, pos.Y, radius + 6);
+            canvas.FillColor = body.WithAlpha(0.40f);
+            canvas.FillCircle(pos.X, pos.Y, radius + 3);
+        }
+        else if (star.Magnitude < 2.5)
+        {
+            canvas.FillColor = body.WithAlpha(0.30f);
+            canvas.FillCircle(pos.X, pos.Y, radius + 3);
+        }
+
+        canvas.FillColor = body;
+        canvas.FillCircle(pos.X, pos.Y, radius);
+
+        // Diffraction-spike cross for the very brightest stars (mag < 0).
+        if (star.Magnitude < 0.5)
+        {
+            canvas.StrokeColor = body.WithAlpha(0.45f);
+            canvas.StrokeSize = 1.0f;
+            float spike = radius + 8f;
+            canvas.DrawLine(pos.X - spike, pos.Y, pos.X + spike, pos.Y);
+            canvas.DrawLine(pos.X, pos.Y - spike, pos.X, pos.Y + spike);
+        }
+
+        // Labels: highlighted always, bright stars otherwise.
+        if (highlighted || star.Magnitude < 2.5)
+        {
+            canvas.FontColor = highlighted ? Colors.Yellow : Color.FromRgba(220, 235, 255, 210);
+            canvas.FontSize = highlighted ? 15f : 12f;
+            canvas.DrawString(
+                star.Name,
+                pos.X + baseRadius + 6,
+                pos.Y - 6,
+                HorizontalAlignment.Left);
+        }
+    }
+
+    private static Color TintByMagnitude(double magnitude)
+    {
+        // Map magnitude (-2 = warm white, 5 = pale blue) onto a smooth gradient.
+        double t = Math.Clamp((magnitude + 2.0) / 7.0, 0, 1);
+        byte r = (byte)(255 - 35 * t);   // 255 → 220
+        byte g = (byte)(245 - 10 * t);   // 245 → 235
+        byte b = (byte)(225 + 30 * t);   // 225 → 255
+        return Color.FromRgba(r, g, b, (byte)230);
+    }
+
     private static void DrawPlanet(ICanvas canvas, ProjectedPlanet planet)
     {
-        // Solid disc + glow ring, labelled with the planet's name.
+        // Outer soft halo — 3 concentric circles with decaying alpha.
+        canvas.FillColor = planet.Color.WithAlpha(0.10f);
+        canvas.FillCircle(planet.Position.X, planet.Position.Y, planet.Radius + 14);
+        canvas.FillColor = planet.Color.WithAlpha(0.22f);
+        canvas.FillCircle(planet.Position.X, planet.Position.Y, planet.Radius + 8);
+        canvas.FillColor = planet.Color.WithAlpha(0.45f);
+        canvas.FillCircle(planet.Position.X, planet.Position.Y, planet.Radius + 4);
+
+        // Solid disc.
         canvas.FillColor = planet.Color;
         canvas.FillCircle(planet.Position.X, planet.Position.Y, planet.Radius);
 
-        canvas.StrokeColor = planet.Color.WithAlpha(0.35f);
-        canvas.StrokeSize = 1.5f;
-        canvas.DrawCircle(planet.Position.X, planet.Position.Y, planet.Radius + 4);
+        // Saturn gets its rings.
+        if (planet.Name == "Saturn")
+        {
+            DrawSaturnRings(canvas, planet);
+        }
 
-        canvas.FontColor = planet.Color.WithAlpha(0.9f);
+        // Label with subtle drop shadow for readability over the camera feed.
         canvas.FontSize = 13f;
+        canvas.FontColor = Color.FromRgba(0, 0, 0, 160);
+        canvas.DrawString(
+            planet.Name,
+            planet.Position.X + planet.Radius + 7,
+            planet.Position.Y - 5,
+            HorizontalAlignment.Left);
+        canvas.FontColor = planet.Color.WithAlpha(0.95f);
         canvas.DrawString(
             planet.Name,
             planet.Position.X + planet.Radius + 6,
@@ -101,36 +196,31 @@ public sealed class StarOverlayDrawable : IDrawable
             HorizontalAlignment.Left);
     }
 
-    private static void DrawStar(ICanvas canvas, Star star, PointF pos, bool highlighted)
+    private static void DrawSaturnRings(ICanvas canvas, ProjectedPlanet planet)
     {
-        // Size inversely proportional to magnitude (brighter = larger dot)
-        float radius = StarRadius(star.Magnitude);
+        // Tilted ellipse around Saturn — purely cosmetic, fixed tilt.
+        canvas.SaveState();
+        canvas.Rotate(-22f, planet.Position.X, planet.Position.Y);
 
-        // Star dot — white with slight blue tint
-        canvas.FillColor = highlighted
-            ? Colors.Yellow
-            : Color.FromRgba(200, 220, 255, 230);
-        canvas.FillCircle(pos.X, pos.Y, radius);
+        float ringRx = planet.Radius * 2.4f;
+        float ringRy = planet.Radius * 0.7f;
 
-        // Glow ring for bright stars (magnitude < 2)
-        if (star.Magnitude < 2.0f)
-        {
-            canvas.StrokeColor = Color.FromRgba(200, 220, 255, 60);
-            canvas.StrokeSize = 1f;
-            canvas.DrawCircle(pos.X, pos.Y, radius + 4);
-        }
+        canvas.StrokeColor = planet.Color.WithAlpha(0.85f);
+        canvas.StrokeSize = 1.8f;
+        canvas.DrawEllipse(
+            planet.Position.X - ringRx, planet.Position.Y - ringRy,
+            ringRx * 2, ringRy * 2);
 
-        // Label — always show for highlighted, show for bright stars otherwise
-        if (highlighted || star.Magnitude < 2.5)
-        {
-            canvas.FontColor = highlighted ? Colors.Yellow : Color.FromRgba(200, 230, 255, 210);
-            canvas.FontSize = highlighted ? 15f : 12f;
-            canvas.DrawString(
-                star.Name,
-                pos.X + radius + 6,
-                pos.Y - 6,
-                HorizontalAlignment.Left);
-        }
+        // Inner faint ring for layered look.
+        canvas.StrokeColor = planet.Color.WithAlpha(0.45f);
+        canvas.StrokeSize = 1.0f;
+        float innerRx = planet.Radius * 1.7f;
+        float innerRy = planet.Radius * 0.5f;
+        canvas.DrawEllipse(
+            planet.Position.X - innerRx, planet.Position.Y - innerRy,
+            innerRx * 2, innerRy * 2);
+
+        canvas.RestoreState();
     }
 
     private static void DrawCrosshair(ICanvas canvas, float cx, float cy)
@@ -156,13 +246,12 @@ public sealed class StarOverlayDrawable : IDrawable
 
     /// <summary>
     /// Maps visual magnitude to dot radius (brighter → bigger dot).
-    /// Magnitude scale: -2 → 10px, 5 → 2px.
+    /// Magnitude scale: -2 → 11px, 5 → 1.5px.
     /// </summary>
     private static float StarRadius(double magnitude)
     {
-        // Linear interpolation: mag -2 → r=10, mag 5 → r=1.5
-        double t = (magnitude + 2.0) / 7.0; // 0 at mag -2, 1 at mag 5
+        double t = (magnitude + 2.0) / 7.0;
         t = Math.Clamp(t, 0.0, 1.0);
-        return (float)(10.0 - t * 8.5);
+        return (float)(11.0 - t * 9.5);
     }
 }
