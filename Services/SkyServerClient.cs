@@ -15,7 +15,7 @@ public sealed class SkyServerClient
     /// with <c>STARSTRACKER_API_BASE</c> environment variable during local
     /// development against a localhost server.
     /// </summary>
-    public const string DefaultBaseUrl = "https://starstracker-api.up.railway.app";
+    public const string DefaultBaseUrl = "https://starstracker-production.up.railway.app";
 
     private static readonly TimeSpan PlanetCacheTtl = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan ConstellationCacheTtl = TimeSpan.FromDays(7);
