@@ -181,13 +181,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         StatusText = "Starting sensors...";
         _orientation.Start();
 
-        // Pull static catalogues once (constellations, deep-sky) and the
-        // time-dependent ones (planets, meteor showers) immediately. Fire-
-        // and-forget — the overlay degrades gracefully without these.
+        // Pull static catalogues once (constellations, deep-sky, full HYG)
+        // and the time-dependent ones (planets, meteor showers) immediately.
+        // Fire-and-forget — the overlay degrades gracefully without these.
         _ = FetchConstellationsAsync();
         _ = FetchDeepSkyAsync();
         _ = FetchPlanetsAsync(force: true);
         _ = FetchMeteorShowersAsync(force: true);
+        _ = FetchExtendedStarsAsync();
 
         _refreshTimer = Application.Current!.Dispatcher.CreateTimer();
         _refreshTimer.Interval = TimeSpan.FromMilliseconds(100);
@@ -235,6 +236,32 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             var result = await _skyServer.GetDeepSkyAsync();
             if (result is not null) _deepSky = result;
+        }
+        catch
+        {
+        }
+    }
+
+    private async Task FetchExtendedStarsAsync()
+    {
+        try
+        {
+            var result = await _skyServer.GetExtendedStarsAsync();
+            if (result is null || result.Count == 0) return;
+
+            // Replace the bundled 300-star catalogue with the full HYG set
+            // (~5000 entries mag ≤ 6). Rebuild the name lookup so the
+            // constellation segments still resolve.
+            var merged = result
+                .Select(r => new Star(r.Id, r.Name, r.Ra, r.Dec, r.Mag, r.DistLy))
+                .OrderBy(s => s.Magnitude)
+                .ToList()
+                .AsReadOnly();
+            _allStars = merged;
+            _starsByName = merged
+                .GroupBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.OrderBy(s => s.Magnitude).First(),
+                    StringComparer.OrdinalIgnoreCase);
         }
         catch
         {

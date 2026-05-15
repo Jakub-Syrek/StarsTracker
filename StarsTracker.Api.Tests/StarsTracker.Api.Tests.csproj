@@ -25,6 +25,14 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<!-- Mirror the API's extended-stars resource so WebApplicationFactory
+		     can locate it during integration tests (content root = test bin). -->
+		<Content Include="..\StarsTracker.Api\Resources\stars-extended.json"
+		         Link="Resources\stars-extended.json"
+		         CopyToOutputDirectory="PreserveNewest" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<Using Include="Xunit" />
 		<Using Include="FluentAssertions" />
 	</ItemGroup>

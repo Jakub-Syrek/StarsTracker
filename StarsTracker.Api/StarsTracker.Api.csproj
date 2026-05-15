@@ -29,6 +29,14 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<!-- The SDK auto-includes Resources/stars-extended.json as Content; force
+		     it to be published alongside the assembly. -->
+		<Content Update="Resources\stars-extended.json">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Content>
+	</ItemGroup>
+
+	<ItemGroup>
 		<ProjectReference Include="..\StarsTracker.Shared\StarsTracker.Shared.csproj" />
 		<ProjectReference Include="..\StarsTracker.Core\StarsTracker.Core.csproj" />
 	</ItemGroup>

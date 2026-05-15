@@ -21,12 +21,14 @@ public sealed class SkyServerClient
     private static readonly TimeSpan ConstellationCacheTtl = TimeSpan.FromDays(7);
     private static readonly TimeSpan DeepSkyCacheTtl = TimeSpan.FromDays(7);
     private static readonly TimeSpan MeteorCacheTtl = TimeSpan.FromHours(6);
+    private static readonly TimeSpan ExtendedStarsCacheTtl = TimeSpan.FromDays(30);
 
     private readonly HttpClient _http;
     private readonly string _planetCachePath;
     private readonly string _constellationCachePath;
     private readonly string _deepSkyCachePath;
     private readonly string _meteorCachePath;
+    private readonly string _extendedStarsCachePath;
 
     public SkyServerClient(HttpClient http)
     {
@@ -46,6 +48,7 @@ public sealed class SkyServerClient
         _constellationCachePath = Path.Combine(cacheDir, "constellations.json");
         _deepSkyCachePath = Path.Combine(cacheDir, "deepsky.json");
         _meteorCachePath = Path.Combine(cacheDir, "meteors.json");
+        _extendedStarsCachePath = Path.Combine(cacheDir, "stars-extended.json");
     }
 
     /// <summary>
@@ -209,6 +212,45 @@ public sealed class SkyServerClient
         }
 
         return TryReadCache<List<MeteorShowerDto>>(_meteorCachePath, TimeSpan.MaxValue, out var stale)
+            ? stale!
+            : null;
+    }
+
+    /// <summary>
+    /// Fetches the full HYG-derived naked-eye catalogue (~5000 entries, mag ≤ 6).
+    /// Cached aggressively for 30 days — the data ships with the API image
+    /// and only changes when the server publishes a new release.
+    /// </summary>
+    public async Task<IReadOnlyList<StarRecordDto>?> GetExtendedStarsAsync(CancellationToken ct = default)
+    {
+        if (TryReadCache<List<StarRecordDto>>(_extendedStarsCachePath, ExtendedStarsCacheTtl, out var fresh))
+        {
+            Log($"extended-stars: cache hit ({fresh!.Count})");
+            return fresh!;
+        }
+
+        try
+        {
+            Log($"extended-stars: GET {_http.BaseAddress}api/v1/stars/extended");
+            var response = await _http.GetFromJsonAsync<List<StarRecordDto>>("/api/v1/stars/extended", ct);
+            if (response is not null)
+            {
+                WriteCache(_extendedStarsCachePath, response);
+                Log($"extended-stars: OK ({response.Count})");
+                return response;
+            }
+            Log("extended-stars: null response body");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            Log($"extended-stars: network error — {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            Log($"extended-stars: unexpected error — {ex.GetType().Name}: {ex.Message}");
+        }
+
+        return TryReadCache<List<StarRecordDto>>(_extendedStarsCachePath, TimeSpan.MaxValue, out var stale)
             ? stale!
             : null;
     }
