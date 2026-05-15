@@ -23,6 +23,8 @@ public sealed class StarOverlayDrawable : IDrawable
     private IReadOnlyList<(Star Star, PointF Position)> _projectedStars = [];
     private IReadOnlyList<ProjectedPlanet> _projectedPlanets = [];
     private IReadOnlyList<(PointF From, PointF To)> _constellationLines = [];
+    private IReadOnlyList<ProjectedDeepSky> _projectedDeepSky = [];
+    private IReadOnlyList<ProjectedMeteorRadiant> _projectedMeteors = [];
 
     // Current screen size (updated on every Draw call)
     private SizeF _screenSize = new(1, 1);
@@ -30,23 +32,38 @@ public sealed class StarOverlayDrawable : IDrawable
     // Highlighted star (closest to crosshair)
     private Star? _highlighted;
 
-    /// <summary>
-    /// A solar-system body projected to screen pixels with the colour and
-    /// radius the drawable should render it with.
-    /// </summary>
     public readonly record struct ProjectedPlanet(
         string Name, PointF Position, Color Color, float Radius);
+
+    /// <summary>
+    /// A Messier / showpiece deep-sky object projected for the overlay.
+    /// </summary>
+    public readonly record struct ProjectedDeepSky(
+        string Id, string Name, string Type,
+        PointF Position, float RadiusPx, Color Color);
+
+    /// <summary>
+    /// A meteor-shower radiant projected for the overlay. Includes
+    /// metadata for the days-until-peak badge.
+    /// </summary>
+    public readonly record struct ProjectedMeteorRadiant(
+        string Code, string Name, int DaysUntilPeak, int ZenithalHourlyRate,
+        PointF Position);
 
     public void Update(
         IReadOnlyList<(Star Star, PointF Position)> projectedStars,
         Star? highlighted,
         IReadOnlyList<ProjectedPlanet>? projectedPlanets = null,
-        IReadOnlyList<(PointF From, PointF To)>? constellationLines = null)
+        IReadOnlyList<(PointF From, PointF To)>? constellationLines = null,
+        IReadOnlyList<ProjectedDeepSky>? projectedDeepSky = null,
+        IReadOnlyList<ProjectedMeteorRadiant>? projectedMeteors = null)
     {
         _projectedStars = projectedStars;
         _highlighted = highlighted;
         _projectedPlanets = projectedPlanets ?? [];
         _constellationLines = constellationLines ?? [];
+        _projectedDeepSky = projectedDeepSky ?? [];
+        _projectedMeteors = projectedMeteors ?? [];
     }
 
     public void Draw(ICanvas canvas, RectF dirtyRect)
@@ -57,7 +74,14 @@ public sealed class StarOverlayDrawable : IDrawable
 
         canvas.SaveState();
 
-        // Constellation lines first so star dots draw on top.
+        // Render order (bottom → top):
+        //   1. Deep-sky diffuse blobs (background)
+        //   2. Constellation lines
+        //   3. Stars
+        //   4. Planets
+        //   5. Meteor-shower radiants
+        //   6. Crosshair on top
+        DrawDeepSky(canvas);
         DrawConstellations(canvas);
 
         // Time phase for twinkle (cycles every ~6 seconds).
@@ -75,9 +99,95 @@ public sealed class StarOverlayDrawable : IDrawable
             DrawPlanet(canvas, planet);
         }
 
+        // Meteor-shower radiants — animated spokes overlay.
+        DrawMeteorRadiants(canvas, timePhase);
+
         DrawCrosshair(canvas, cx, cy);
 
         canvas.RestoreState();
+    }
+
+    private void DrawDeepSky(ICanvas canvas)
+    {
+        if (_projectedDeepSky.Count == 0) return;
+        foreach (var obj in _projectedDeepSky)
+        {
+            // Soft diffuse blob — four concentric circles with decaying alpha
+            // so the edge fades to nothing instead of a hard outline.
+            float r = obj.RadiusPx;
+            canvas.FillColor = obj.Color.WithAlpha(0.06f);
+            canvas.FillCircle(obj.Position.X, obj.Position.Y, r);
+            canvas.FillColor = obj.Color.WithAlpha(0.12f);
+            canvas.FillCircle(obj.Position.X, obj.Position.Y, r * 0.75f);
+            canvas.FillColor = obj.Color.WithAlpha(0.22f);
+            canvas.FillCircle(obj.Position.X, obj.Position.Y, r * 0.5f);
+            canvas.FillColor = obj.Color.WithAlpha(0.40f);
+            canvas.FillCircle(obj.Position.X, obj.Position.Y, r * 0.25f);
+
+            // Identifier (e.g. "M31") in the centre, common name below.
+            canvas.FontSize = 11f;
+            canvas.FontColor = Color.FromRgba(0, 0, 0, 160);
+            canvas.DrawString(obj.Id, obj.Position.X + 1, obj.Position.Y + 1,
+                HorizontalAlignment.Center);
+            canvas.FontColor = obj.Color.WithAlpha(0.95f);
+            canvas.DrawString(obj.Id, obj.Position.X, obj.Position.Y,
+                HorizontalAlignment.Center);
+
+            canvas.FontSize = 9.5f;
+            canvas.FontColor = Color.FromRgba(220, 230, 245, 180);
+            canvas.DrawString(obj.Name,
+                obj.Position.X, obj.Position.Y + 14,
+                HorizontalAlignment.Center);
+        }
+    }
+
+    private void DrawMeteorRadiants(ICanvas canvas, double timePhase)
+    {
+        if (_projectedMeteors.Count == 0) return;
+
+        foreach (var radiant in _projectedMeteors)
+        {
+            // Colour: yellow if active (|days| ≤ 2), softer cyan otherwise.
+            bool isActiveNow = Math.Abs(radiant.DaysUntilPeak) <= 2;
+            Color core = isActiveNow ? Color.FromArgb("#FFC857") : Color.FromArgb("#7DCFFF");
+
+            // Slowly-rotating spokes giving the radiant a meteor-emerging feel.
+            float spokeLen = 18f;
+            canvas.SaveState();
+            canvas.Rotate((float)(timePhase * 12), radiant.Position.X, radiant.Position.Y);
+            canvas.StrokeColor = core.WithAlpha(0.65f);
+            canvas.StrokeSize = 1.4f;
+            for (int i = 0; i < 6; i++)
+            {
+                double a = i * Math.PI / 3.0;
+                float ex = radiant.Position.X + (float)(Math.Cos(a) * spokeLen);
+                float ey = radiant.Position.Y + (float)(Math.Sin(a) * spokeLen);
+                canvas.DrawLine(radiant.Position.X, radiant.Position.Y, ex, ey);
+            }
+            canvas.RestoreState();
+
+            // Central glowing dot.
+            canvas.FillColor = core.WithAlpha(0.40f);
+            canvas.FillCircle(radiant.Position.X, radiant.Position.Y, 7);
+            canvas.FillColor = core;
+            canvas.FillCircle(radiant.Position.X, radiant.Position.Y, 3.5f);
+
+            // Label "PER  in 5 d" or "GEM  ACTIVE".
+            string badge = isActiveNow
+                ? "ACTIVE"
+                : radiant.DaysUntilPeak >= 0
+                    ? $"in {radiant.DaysUntilPeak} d"
+                    : $"{-radiant.DaysUntilPeak} d ago";
+            canvas.FontSize = 11f;
+            canvas.FontColor = Color.FromRgba(0, 0, 0, 200);
+            canvas.DrawString($"{radiant.Code}  {badge}",
+                radiant.Position.X + 13, radiant.Position.Y - 9,
+                HorizontalAlignment.Left);
+            canvas.FontColor = core;
+            canvas.DrawString($"{radiant.Code}  {badge}",
+                radiant.Position.X + 12, radiant.Position.Y - 10,
+                HorizontalAlignment.Left);
+        }
     }
 
     private void DrawConstellations(ICanvas canvas)

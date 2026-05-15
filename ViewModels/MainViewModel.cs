@@ -19,8 +19,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     // Server-side payloads (refreshed periodically; survive offline via disk cache).
     private IReadOnlyList<PlanetPositionDto> _planets = [];
     private IReadOnlyList<ConstellationDto> _constellations = [];
+    private IReadOnlyList<DeepSkyObjectDto> _deepSky = [];
+    private IReadOnlyList<MeteorShowerDto> _meteors = [];
     private Dictionary<string, Star> _starsByName = new(StringComparer.OrdinalIgnoreCase);
     private DateTime _lastPlanetsFetch = DateTime.MinValue;
+    private DateTime _lastMeteorsFetch = DateTime.MinValue;
 
     // Camera horizontal FOV in degrees. Initial guess for a typical smartphone
     // main rear camera; overwritten by Camera2 characteristics during preview
@@ -178,10 +181,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         StatusText = "Starting sensors...";
         _orientation.Start();
 
-        // Pull constellations once (static) and planets immediately. Fire-and-
-        // forget — the overlay degrades gracefully without these.
+        // Pull static catalogues once (constellations, deep-sky) and the
+        // time-dependent ones (planets, meteor showers) immediately. Fire-
+        // and-forget — the overlay degrades gracefully without these.
         _ = FetchConstellationsAsync();
+        _ = FetchDeepSkyAsync();
         _ = FetchPlanetsAsync(force: true);
+        _ = FetchMeteorShowersAsync(force: true);
 
         _refreshTimer = Application.Current!.Dispatcher.CreateTimer();
         _refreshTimer.Interval = TimeSpan.FromMilliseconds(100);
@@ -216,6 +222,37 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             {
                 _planets = result;
                 _lastPlanetsFetch = DateTime.UtcNow;
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private async Task FetchDeepSkyAsync()
+    {
+        try
+        {
+            var result = await _skyServer.GetDeepSkyAsync();
+            if (result is not null) _deepSky = result;
+        }
+        catch
+        {
+        }
+    }
+
+    private async Task FetchMeteorShowersAsync(bool force = false)
+    {
+        if (!force && (DateTime.UtcNow - _lastMeteorsFetch) < TimeSpan.FromHours(6))
+            return;
+
+        try
+        {
+            var result = await _skyServer.GetMeteorShowersAsync(DateTime.UtcNow);
+            if (result is not null)
+            {
+                _meteors = result;
+                _lastMeteorsFetch = DateTime.UtcNow;
             }
         }
         catch
@@ -329,6 +366,139 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// are immediately recognisable in the AR overlay rather than getting
     /// lost among the background stars.
     /// </summary>
+    /// <summary>
+    /// Projects each Messier / showpiece deep-sky object into the camera
+    /// frame. The size on screen is computed from <c>ApparentSizeArcmin</c>
+    /// so M31 looks like the huge oval it really is.
+    /// </summary>
+    private List<StarOverlayDrawable.ProjectedDeepSky> ProjectDeepSky(
+        DateTime utcNow,
+        double focal,
+        double cx,
+        double cy,
+        double[]? r,
+        bool useQuat,
+        double azCal,
+        double altCal)
+    {
+        var list = new List<StarOverlayDrawable.ProjectedDeepSky>(_deepSky.Count);
+        foreach (var obj in _deepSky)
+        {
+            var (raDeg, decDeg) = AstronomyService.PrecessFromJ2000(
+                obj.RightAscensionDeg, obj.DeclinationDeg, utcNow);
+            AstronomyService.EquatorialToHorizontal(
+                raDeg, decDeg, _latitudeDeg, _longitudeDeg, utcNow,
+                out double az, out double alt);
+            alt += AstronomyService.AtmosphericRefractionDeg(alt);
+            if (alt < -5.0) continue;
+
+            var (wE, wN, wU) = ProjectionMath.AzAltToWorldVector(az - azCal, alt - altCal);
+            double dx, dy, dz;
+            if (useQuat)
+            {
+                (dx, dy, dz) = OrientationMath.WorldToDevice(r!, wE, wN, wU);
+            }
+            else
+            {
+                double devAz = _orientation.AzimuthDeg * Math.PI / 180.0;
+                double devAlt = _orientation.AltitudeDeg * Math.PI / 180.0;
+                double dEastRel = wE * Math.Cos(devAz) - wN * Math.Sin(devAz);
+                double dNorthRel = wE * Math.Sin(devAz) + wN * Math.Cos(devAz);
+                dx = dEastRel;
+                dy = wU * Math.Cos(devAlt) - dNorthRel * Math.Sin(devAlt);
+                dz = -(dNorthRel * Math.Cos(devAlt) + wU * Math.Sin(devAlt));
+            }
+
+            var screen = ProjectionMath.Project(dx, dy, dz, cx, cy, focal);
+            if (screen is null) continue;
+            float sx = (float)screen.Value.sx;
+            float sy = (float)screen.Value.sy;
+            if (sx < -200 || sx > _screenWidth + 200) continue;
+            if (sy < -200 || sy > _screenHeight + 200) continue;
+
+            // Angular radius in degrees → pixel radius via pinhole focal.
+            double angularRadiusDeg = obj.ApparentSizeArcmin / 60.0 / 2.0;
+            float radiusPx = (float)(focal * Math.Tan(angularRadiusDeg * Math.PI / 180.0));
+            // Clamp so tiny pinpoints stay visible (>= 6 px) and huge clouds
+            // don't swamp the entire screen.
+            radiusPx = Math.Clamp(radiusPx, 6f, (float)(_screenWidth * 0.4));
+
+            list.Add(new StarOverlayDrawable.ProjectedDeepSky(
+                obj.Id, obj.Name, obj.Type,
+                new PointF(sx, sy), radiusPx, ColorForType(obj.Type)));
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// Projects each active meteor-shower radiant into the camera frame so
+    /// the drawable can render the spinning "spokes" icon plus the days-
+    /// until-peak badge.
+    /// </summary>
+    private List<StarOverlayDrawable.ProjectedMeteorRadiant> ProjectMeteorRadiants(
+        DateTime utcNow,
+        double focal,
+        double cx,
+        double cy,
+        double[]? r,
+        bool useQuat,
+        double azCal,
+        double altCal)
+    {
+        var list = new List<StarOverlayDrawable.ProjectedMeteorRadiant>(_meteors.Count);
+        foreach (var shower in _meteors)
+        {
+            var (raDeg, decDeg) = AstronomyService.PrecessFromJ2000(
+                shower.RadiantRightAscensionDeg, shower.RadiantDeclinationDeg, utcNow);
+            AstronomyService.EquatorialToHorizontal(
+                raDeg, decDeg, _latitudeDeg, _longitudeDeg, utcNow,
+                out double az, out double alt);
+            alt += AstronomyService.AtmosphericRefractionDeg(alt);
+            if (alt < -10.0) continue;
+
+            var (wE, wN, wU) = ProjectionMath.AzAltToWorldVector(az - azCal, alt - altCal);
+            double dx, dy, dz;
+            if (useQuat)
+            {
+                (dx, dy, dz) = OrientationMath.WorldToDevice(r!, wE, wN, wU);
+            }
+            else
+            {
+                double devAz = _orientation.AzimuthDeg * Math.PI / 180.0;
+                double devAlt = _orientation.AltitudeDeg * Math.PI / 180.0;
+                double dEastRel = wE * Math.Cos(devAz) - wN * Math.Sin(devAz);
+                double dNorthRel = wE * Math.Sin(devAz) + wN * Math.Cos(devAz);
+                dx = dEastRel;
+                dy = wU * Math.Cos(devAlt) - dNorthRel * Math.Sin(devAlt);
+                dz = -(dNorthRel * Math.Cos(devAlt) + wU * Math.Sin(devAlt));
+            }
+
+            var screen = ProjectionMath.Project(dx, dy, dz, cx, cy, focal);
+            if (screen is null) continue;
+            float sx = (float)screen.Value.sx;
+            float sy = (float)screen.Value.sy;
+            if (sx < -200 || sx > _screenWidth + 200) continue;
+            if (sy < -200 || sy > _screenHeight + 200) continue;
+
+            list.Add(new StarOverlayDrawable.ProjectedMeteorRadiant(
+                shower.Code, shower.Name, shower.DaysUntilPeak,
+                shower.ZenithalHourlyRate,
+                new PointF(sx, sy)));
+        }
+        return list;
+    }
+
+    private static Color ColorForType(string type) => type switch
+    {
+        "Galaxy"            => Color.FromArgb("#9BB8FF"), // cool blue-violet
+        "Nebula"            => Color.FromArgb("#FF9E80"), // warm pink-orange (H-alpha)
+        "Planetary Nebula"  => Color.FromArgb("#7DE6C9"), // teal-green
+        "Open Cluster"      => Color.FromArgb("#FFE082"), // soft yellow
+        "Globular Cluster"  => Color.FromArgb("#FFD6A0"), // amber
+        "Supernova Remnant" => Color.FromArgb("#E0A0FF"), // lilac
+        _                   => Color.FromArgb("#CFCFEF"),
+    };
+
     private static (Color color, float radius) PlanetStyle(string name) => name switch
     {
         "Sun"     => (Color.FromArgb("#FFD24A"), 38f),
@@ -441,13 +611,22 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         // ---- Planets ----
         var projectedPlanets = ProjectPlanets(utcNow, focal, cx, cy, r, useQuat, azCal, altCal);
 
+        // ---- Deep-sky objects ----
+        var projectedDeepSky = ProjectDeepSky(utcNow, focal, cx, cy, r, useQuat, azCal, altCal);
+
+        // ---- Meteor radiants ----
+        var projectedMeteors = ProjectMeteorRadiants(utcNow, focal, cx, cy, r, useQuat, azCal, altCal);
+
         // ---- Constellation lines ----
         var projectedStarPositions = projected
             .GroupBy(p => p.Item1.Name, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First().Item2, StringComparer.OrdinalIgnoreCase);
         var constellationLines = ProjectConstellationLines(projectedStarPositions);
 
-        StarDrawable.Update(projected, highlighted, projectedPlanets, constellationLines);
+        StarDrawable.Update(
+            projected, highlighted,
+            projectedPlanets, constellationLines,
+            projectedDeepSky, projectedMeteors);
 
         HasHighlightedStar = highlighted is not null;
         HighlightedStarName = highlighted?.Name ?? string.Empty;

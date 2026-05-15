@@ -19,6 +19,8 @@ builder.Services.AddResponseCaching();
 
 builder.Services.AddSingleton<IPlanetEphemerisService, PlanetEphemerisService>();
 builder.Services.AddSingleton<IConstellationCatalog, ConstellationCatalog>();
+builder.Services.AddSingleton<IDeepSkyCatalog, DeepSkyCatalog>();
+builder.Services.AddSingleton<IMeteorShowerCatalog, MeteorShowerCatalog>();
 
 var app = builder.Build();
 
@@ -33,6 +35,8 @@ app.UseStatusCodePages();
 app.MapHealthEndpoints();
 app.MapPlanetEndpoints();
 app.MapConstellationEndpoints();
+app.MapDeepSkyEndpoints();
+app.MapMeteorShowerEndpoints();
 
 app.Run();
 

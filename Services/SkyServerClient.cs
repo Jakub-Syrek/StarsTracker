@@ -19,10 +19,14 @@ public sealed class SkyServerClient
 
     private static readonly TimeSpan PlanetCacheTtl = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan ConstellationCacheTtl = TimeSpan.FromDays(7);
+    private static readonly TimeSpan DeepSkyCacheTtl = TimeSpan.FromDays(7);
+    private static readonly TimeSpan MeteorCacheTtl = TimeSpan.FromHours(6);
 
     private readonly HttpClient _http;
     private readonly string _planetCachePath;
     private readonly string _constellationCachePath;
+    private readonly string _deepSkyCachePath;
+    private readonly string _meteorCachePath;
 
     public SkyServerClient(HttpClient http)
     {
@@ -40,6 +44,8 @@ public sealed class SkyServerClient
         Directory.CreateDirectory(cacheDir);
         _planetCachePath = Path.Combine(cacheDir, "planets.json");
         _constellationCachePath = Path.Combine(cacheDir, "constellations.json");
+        _deepSkyCachePath = Path.Combine(cacheDir, "deepsky.json");
+        _meteorCachePath = Path.Combine(cacheDir, "meteors.json");
     }
 
     /// <summary>
@@ -126,6 +132,85 @@ public sealed class SkyServerClient
         }
         Log("constellations: no data");
         return null;
+    }
+
+    /// <summary>
+    /// Fetches the Messier-plus showpieces catalogue. Long-lived cache —
+    /// the data is editorial and changes only when the server ships a
+    /// new release.
+    /// </summary>
+    public async Task<IReadOnlyList<DeepSkyObjectDto>?> GetDeepSkyAsync(CancellationToken ct = default)
+    {
+        if (TryReadCache<List<DeepSkyObjectDto>>(_deepSkyCachePath, DeepSkyCacheTtl, out var fresh))
+        {
+            Log($"deepsky: cache hit ({fresh!.Count})");
+            return fresh!;
+        }
+
+        try
+        {
+            Log($"deepsky: GET {_http.BaseAddress}api/v1/deepsky");
+            var response = await _http.GetFromJsonAsync<List<DeepSkyObjectDto>>("/api/v1/deepsky", ct);
+            if (response is not null)
+            {
+                WriteCache(_deepSkyCachePath, response);
+                Log($"deepsky: OK ({response.Count})");
+                return response;
+            }
+            Log("deepsky: null response body");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            Log($"deepsky: network error — {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            Log($"deepsky: unexpected error — {ex.GetType().Name}: {ex.Message}");
+        }
+
+        return TryReadCache<List<DeepSkyObjectDto>>(_deepSkyCachePath, TimeSpan.MaxValue, out var stale)
+            ? stale!
+            : null;
+    }
+
+    /// <summary>
+    /// Fetches the meteor showers active around the supplied UTC. Cached
+    /// for 6 hours — short enough that newly-entering showers appear without
+    /// a fresh install, long enough not to hammer the API.
+    /// </summary>
+    public async Task<IReadOnlyList<MeteorShowerDto>?> GetMeteorShowersAsync(DateTime utc, CancellationToken ct = default)
+    {
+        if (TryReadCache<List<MeteorShowerDto>>(_meteorCachePath, MeteorCacheTtl, out var fresh))
+        {
+            Log($"meteors: cache hit ({fresh!.Count})");
+            return fresh!;
+        }
+
+        try
+        {
+            string url = $"/api/v1/meteorshowers?utc={utc:O}";
+            Log($"meteors: GET {_http.BaseAddress}{url.TrimStart('/')}");
+            var response = await _http.GetFromJsonAsync<List<MeteorShowerDto>>(url, ct);
+            if (response is not null)
+            {
+                WriteCache(_meteorCachePath, response);
+                Log($"meteors: OK ({response.Count})");
+                return response;
+            }
+            Log("meteors: null response body");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            Log($"meteors: network error — {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            Log($"meteors: unexpected error — {ex.GetType().Name}: {ex.Message}");
+        }
+
+        return TryReadCache<List<MeteorShowerDto>>(_meteorCachePath, TimeSpan.MaxValue, out var stale)
+            ? stale!
+            : null;
     }
 
     private static void Log(string msg)
