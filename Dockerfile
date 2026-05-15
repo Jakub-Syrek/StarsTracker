@@ -42,11 +42,11 @@ RUN dotnet publish StarsTracker.Api/StarsTracker.Api.csproj \
 FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_VERSION}-alpine AS final
 WORKDIR /app
 
-# Non-root user for defence in depth.
-RUN addgroup -S app && adduser -S -G app app
-USER app
-
+# Microsoft's aspnet:10.0-alpine ships with a non-root `app` user pre-created
+# (UID 1654). Re-running addgroup/adduser would fail with "already exists",
+# so we just chown the publish output to that user and switch to it.
 COPY --from=build --chown=app:app /app/publish .
+USER app
 
 ENV ASPNETCORE_URLS=http://+:${PORT:-8080}
 EXPOSE 8080
