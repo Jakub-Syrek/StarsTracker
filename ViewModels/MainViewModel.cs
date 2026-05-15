@@ -164,7 +164,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         StatusText = "Loading star catalog...";
         _allStars = await _catalog.GetVisibleStarsAsync();
-        _starsByName = _allStars.ToDictionary(s => s.Name, StringComparer.OrdinalIgnoreCase);
+        // Some HYG entries share a proper name (e.g. components of a double).
+        // Keep the brightest entry per name — that's the one a viewer expects
+        // to see and points at when scanning the sky.
+        _starsByName = _allStars
+            .GroupBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.OrderBy(s => s.Magnitude).First(),
+                StringComparer.OrdinalIgnoreCase);
 
         StatusText = "Acquiring GPS location...";
         await RequestLocationAsync();
