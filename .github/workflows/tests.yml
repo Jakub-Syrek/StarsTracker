@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    name: Build & Test (StarsTracker.Core / StarsTracker.Tests)
+    name: Build & Test (Core / Tests / Api / Api.Tests)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -22,14 +22,23 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Restore
+      - name: Restore Core/Tests
         run: dotnet restore StarsTracker.Tests/StarsTracker.Tests.csproj
 
-      - name: Build (Release)
+      - name: Build Core/Tests
         run: dotnet build StarsTracker.Tests/StarsTracker.Tests.csproj -c Release --no-restore
 
-      - name: Test
+      - name: Run Core/Tests
         run: dotnet test StarsTracker.Tests/StarsTracker.Tests.csproj -c Release --no-build --logger "console;verbosity=normal" --collect:"XPlat Code Coverage"
+
+      - name: Restore Api/Api.Tests
+        run: dotnet restore StarsTracker.Api.Tests/StarsTracker.Api.Tests.csproj
+
+      - name: Build Api/Api.Tests
+        run: dotnet build StarsTracker.Api.Tests/StarsTracker.Api.Tests.csproj -c Release --no-restore
+
+      - name: Run Api/Api.Tests
+        run: dotnet test StarsTracker.Api.Tests/StarsTracker.Api.Tests.csproj -c Release --no-build --logger "console;verbosity=normal" --collect:"XPlat Code Coverage"
 
       - name: Upload coverage
         uses: actions/upload-artifact@v4
@@ -37,6 +46,28 @@ jobs:
         with:
           name: code-coverage
           path: '**/TestResults/**/coverage.cobertura.xml'
+
+  docker:
+    name: Build Docker image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          load: false
+          tags: starstracker-api:ci
 
   code-quality:
     name: Code Quality (authorship + Polish-string check)

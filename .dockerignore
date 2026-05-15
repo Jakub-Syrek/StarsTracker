@@ -1,0 +1,29 @@
+# Keep the docker build context lean — only the backend csprojs + sources.
+
+**/bin
+**/obj
+**/*.user
+**/*.suo
+.git
+.github
+.vs
+
+# Mobile app, tests, scripts and docs are not needed in the API image.
+StarsTracker/
+StarsTracker.Tests/
+StarsTracker.Api.Tests/
+scripts/
+*.md
+*.slnx
+*.png
+*.jpg
+*.gif
+Resources/
+Platforms/
+Models/
+Views/
+ViewModels/
+Controls/
+Services/
+StarsTracker.csproj
+StarsTracker.csproj.user

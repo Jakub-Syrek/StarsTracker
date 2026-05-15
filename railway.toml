@@ -1,0 +1,23 @@
+# Railway deployment manifest for StarsTracker.Api.
+#
+# Railway auto-detects the Dockerfile at the repo root, so the build section
+# only needs to confirm that. The deploy section pins health-check and restart
+# behaviour we want for the backend.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# /healthz is the cheap liveness route (200 OK while the process is up).
+healthcheckPath = "/healthz"
+healthcheckTimeout = 15
+
+# Restart on crash, but cap retries so a poison-pill error (e.g. bad config)
+# doesn't burn credit in a redeploy loop.
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+
+# Hobby plan keeps containers warm — perfect for an ephemeris API where the
+# in-memory cache shouldn't be rebuilt on every request.
+sleepApplication = false

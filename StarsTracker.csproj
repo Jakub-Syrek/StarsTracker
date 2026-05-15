@@ -60,6 +60,21 @@
 		<EmbeddedResource Remove="StarsTracker.Tests\**" />
 		<MauiXaml Remove="StarsTracker.Tests\**" />
 		<MauiCss Remove="StarsTracker.Tests\**" />
+		<Compile Remove="StarsTracker.Api\**" />
+		<None Remove="StarsTracker.Api\**" />
+		<EmbeddedResource Remove="StarsTracker.Api\**" />
+		<MauiXaml Remove="StarsTracker.Api\**" />
+		<MauiCss Remove="StarsTracker.Api\**" />
+		<Compile Remove="StarsTracker.Api.Tests\**" />
+		<None Remove="StarsTracker.Api.Tests\**" />
+		<EmbeddedResource Remove="StarsTracker.Api.Tests\**" />
+		<MauiXaml Remove="StarsTracker.Api.Tests\**" />
+		<MauiCss Remove="StarsTracker.Api.Tests\**" />
+		<Compile Remove="StarsTracker.Shared\**" />
+		<None Remove="StarsTracker.Shared\**" />
+		<EmbeddedResource Remove="StarsTracker.Shared\**" />
+		<MauiXaml Remove="StarsTracker.Shared\**" />
+		<MauiCss Remove="StarsTracker.Shared\**" />
 	</ItemGroup>
 
 	<ItemGroup>
