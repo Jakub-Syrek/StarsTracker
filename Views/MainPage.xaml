@@ -180,6 +180,13 @@
                     CornerRadius="18"
                     Padding="18,6"
                     FontSize="13" />
+            <Button Text="{Binding PlanetariumButtonText}"
+                    Command="{Binding TogglePlanetariumModeCommand}"
+                    BackgroundColor="#324"
+                    TextColor="#CFB8FF"
+                    CornerRadius="18"
+                    Padding="14,6"
+                    FontSize="13" />
         </HorizontalStackLayout>
 
         <!-- ⑨ REC indicator (top-right) while recording -->

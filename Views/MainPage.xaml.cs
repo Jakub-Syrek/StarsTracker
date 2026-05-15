@@ -25,7 +25,15 @@ public partial class MainPage : ContentPage
         InitializeComponent();
         BindingContext = _vm = vm;
         _vm.RedrawRequested += () => StarOverlay.Invalidate();
+        _vm.PlanetariumModeChanged += OnPlanetariumModeChanged;
         Loaded += OnPageLoaded;
+    }
+
+    private void OnPlanetariumModeChanged(bool enabled)
+    {
+#if ANDROID
+        ApplyCameraBlur(enabled);
+#endif
     }
 
     private async void OnPageLoaded(object? sender, EventArgs e)
@@ -237,6 +245,38 @@ public partial class MainPage : ContentPage
         catch (System.Exception ex)
         {
             Log($"FOV detection failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Toggles a strong Gaussian blur on the native PreviewView so the AR
+    /// "planetarium mode" can paint over a softened, dream-like camera feed
+    /// rather than the crisp real-world view. RenderEffect is available
+    /// from API 31 (Android 12); on older devices the blur is silently
+    /// skipped and the dark overlay alone hides the camera image.
+    /// </summary>
+    private void ApplyCameraBlur(bool enabled)
+    {
+        if (_previewView is null) return;
+        if (!OperatingSystem.IsAndroidVersionAtLeast(31)) return;
+
+        try
+        {
+            if (enabled)
+            {
+                var blur = Android.Graphics.RenderEffect.CreateBlurEffect(
+                    radiusX: 40f, radiusY: 40f,
+                    Android.Graphics.Shader.TileMode.Clamp);
+                _previewView.SetRenderEffect(blur);
+            }
+            else
+            {
+                _previewView.SetRenderEffect(null);
+            }
+        }
+        catch (Java.Lang.Exception ex)
+        {
+            Log($"ApplyCameraBlur failed: {ex.Message}");
         }
     }
 

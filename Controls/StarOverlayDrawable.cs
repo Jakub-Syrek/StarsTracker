@@ -32,6 +32,11 @@ public sealed class StarOverlayDrawable : IDrawable
     // Highlighted star (closest to crosshair)
     private Star? _highlighted;
 
+    // Planetarium mode: paints a dark gradient + procedural starfield on top
+    // of the (blurred) camera feed so the overlay becomes the entire scene
+    // with just a hint of the real world bleeding through.
+    private bool _planetariumMode;
+
     public readonly record struct ProjectedPlanet(
         string Name, PointF Position, Color Color, float Radius);
 
@@ -56,7 +61,8 @@ public sealed class StarOverlayDrawable : IDrawable
         IReadOnlyList<ProjectedPlanet>? projectedPlanets = null,
         IReadOnlyList<(PointF From, PointF To)>? constellationLines = null,
         IReadOnlyList<ProjectedDeepSky>? projectedDeepSky = null,
-        IReadOnlyList<ProjectedMeteorRadiant>? projectedMeteors = null)
+        IReadOnlyList<ProjectedMeteorRadiant>? projectedMeteors = null,
+        bool planetariumMode = false)
     {
         _projectedStars = projectedStars;
         _highlighted = highlighted;
@@ -64,6 +70,7 @@ public sealed class StarOverlayDrawable : IDrawable
         _constellationLines = constellationLines ?? [];
         _projectedDeepSky = projectedDeepSky ?? [];
         _projectedMeteors = projectedMeteors ?? [];
+        _planetariumMode = planetariumMode;
     }
 
     public void Draw(ICanvas canvas, RectF dirtyRect)
@@ -73,6 +80,13 @@ public sealed class StarOverlayDrawable : IDrawable
         float cy = dirtyRect.Center.Y;
 
         canvas.SaveState();
+
+        // Planetarium scene first (if enabled): dark gradient + procedural
+        // sparkle stars that hide the camera image but leave a faint reveal.
+        if (_planetariumMode)
+        {
+            DrawPlanetariumBackdrop(canvas, dirtyRect);
+        }
 
         // Render order (bottom → top):
         //   1. Deep-sky diffuse blobs (background)
@@ -105,6 +119,54 @@ public sealed class StarOverlayDrawable : IDrawable
         DrawCrosshair(canvas, cx, cy);
 
         canvas.RestoreState();
+    }
+
+    private static void DrawPlanetariumBackdrop(ICanvas canvas, RectF rect)
+    {
+        // Deep midnight-blue gradient (top: darker, bottom: slightly lighter)
+        // at alpha 0.88 so ~12% of the real camera image still shows through.
+        for (int band = 0; band < 10; band++)
+        {
+            float t = band / 10f;
+            byte r = (byte)(8  + 6  * t);
+            byte g = (byte)(10 + 12 * t);
+            byte b = (byte)(22 + 28 * t);
+            canvas.FillColor = Color.FromRgba(r, g, b, (byte)225);
+            canvas.FillRectangle(
+                rect.X, rect.Y + rect.Height * t,
+                rect.Width, rect.Height * 0.105f);
+        }
+
+        // Procedural sparkle starfield — deterministic per-position random so
+        // it doesn't shimmer between frames at the cost of locality. ~400
+        // tiny dots scattered uniformly with a magnitude-style brightness
+        // distribution.
+        var rng = new Random(seed: 0x57A2);
+        for (int i = 0; i < 400; i++)
+        {
+            float x = rect.X + (float)rng.NextDouble() * rect.Width;
+            float y = rect.Y + (float)rng.NextDouble() * rect.Height;
+            double m = rng.NextDouble();
+            float radius = m < 0.92 ? 0.6f : 1.4f;
+            byte alpha = (byte)(m < 0.92 ? 110 : 220);
+            canvas.FillColor = Color.FromRgba((byte)230, (byte)235, (byte)255, alpha);
+            canvas.FillCircle(x, y, radius);
+        }
+
+        // Subtle horizontal "Milky Way" haze along the lower third — a wide
+        // soft gradient stripe to add depth without overpowering the stars.
+        float mwY = rect.Y + rect.Height * 0.62f;
+        for (int i = 0; i < 6; i++)
+        {
+            float t = i / 5f;
+            byte alpha = (byte)(28 * (1 - Math.Abs(t - 0.5) * 2));
+            canvas.FillColor = Color.FromRgba((byte)180, (byte)160, (byte)210, alpha);
+            canvas.FillRectangle(
+                rect.X,
+                mwY + (t - 0.5f) * rect.Height * 0.18f,
+                rect.Width,
+                rect.Height * 0.04f);
+        }
     }
 
     private void DrawDeepSky(ICanvas canvas)

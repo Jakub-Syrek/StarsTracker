@@ -72,6 +72,22 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private bool _isRecording;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PlanetariumButtonText))]
+    private bool _isPlanetariumMode;
+
+    public string PlanetariumButtonText => IsPlanetariumMode ? "📷 Camera" : "🌌 Planetarium";
+
+    /// <summary>Fires whenever <see cref="IsPlanetariumMode"/> flips so the
+    /// page can apply / remove the native camera blur effect.</summary>
+    public event Action<bool>? PlanetariumModeChanged;
+
+    partial void OnIsPlanetariumModeChanged(bool value)
+        => PlanetariumModeChanged?.Invoke(value);
+
+    [RelayCommand]
+    private void TogglePlanetariumMode() => IsPlanetariumMode = !IsPlanetariumMode;
+
+    [ObservableProperty]
     private string _recordingStatusText = string.Empty;
 
     public string RecordButtonText => IsRecording ? "Stop" : "Record";
@@ -653,7 +669,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         StarDrawable.Update(
             projected, highlighted,
             projectedPlanets, constellationLines,
-            projectedDeepSky, projectedMeteors);
+            projectedDeepSky, projectedMeteors,
+            IsPlanetariumMode);
 
         HasHighlightedStar = highlighted is not null;
         HighlightedStarName = highlighted?.Name ?? string.Empty;
