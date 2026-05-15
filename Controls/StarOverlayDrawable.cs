@@ -15,6 +15,8 @@ public sealed class StarOverlayDrawable : IDrawable
 
     // Stars + their computed screen positions (updated by ViewModel each frame)
     private IReadOnlyList<(Star Star, PointF Position)> _projectedStars = [];
+    private IReadOnlyList<ProjectedPlanet> _projectedPlanets = [];
+    private IReadOnlyList<(PointF From, PointF To)> _constellationLines = [];
 
     // Current screen size (updated on every Draw call)
     private SizeF _screenSize = new(1, 1);
@@ -22,12 +24,23 @@ public sealed class StarOverlayDrawable : IDrawable
     // Highlighted star (closest to crosshair)
     private Star? _highlighted;
 
+    /// <summary>
+    /// A solar-system body projected to screen pixels with the colour and
+    /// radius the drawable should render it with.
+    /// </summary>
+    public readonly record struct ProjectedPlanet(
+        string Name, PointF Position, Color Color, float Radius);
+
     public void Update(
         IReadOnlyList<(Star Star, PointF Position)> projectedStars,
-        Star? highlighted)
+        Star? highlighted,
+        IReadOnlyList<ProjectedPlanet>? projectedPlanets = null,
+        IReadOnlyList<(PointF From, PointF To)>? constellationLines = null)
     {
         _projectedStars = projectedStars;
         _highlighted = highlighted;
+        _projectedPlanets = projectedPlanets ?? [];
+        _constellationLines = constellationLines ?? [];
     }
 
     public void Draw(ICanvas canvas, RectF dirtyRect)
@@ -38,15 +51,54 @@ public sealed class StarOverlayDrawable : IDrawable
 
         canvas.SaveState();
 
+        // Constellation lines first so star dots draw on top.
+        DrawConstellations(canvas);
+
         foreach (var (star, pos) in _projectedStars)
         {
             bool isHighlighted = star == _highlighted;
             DrawStar(canvas, star, pos, isHighlighted);
         }
 
+        // Planets above stars so they're never occluded by faint background dots.
+        foreach (var planet in _projectedPlanets)
+        {
+            DrawPlanet(canvas, planet);
+        }
+
         DrawCrosshair(canvas, cx, cy);
 
         canvas.RestoreState();
+    }
+
+    private void DrawConstellations(ICanvas canvas)
+    {
+        if (_constellationLines.Count == 0) return;
+        canvas.StrokeColor = Color.FromRgba(140, 170, 220, 70);
+        canvas.StrokeSize = 1.0f;
+        foreach (var (from, to) in _constellationLines)
+        {
+            canvas.DrawLine(from.X, from.Y, to.X, to.Y);
+        }
+    }
+
+    private static void DrawPlanet(ICanvas canvas, ProjectedPlanet planet)
+    {
+        // Solid disc + glow ring, labelled with the planet's name.
+        canvas.FillColor = planet.Color;
+        canvas.FillCircle(planet.Position.X, planet.Position.Y, planet.Radius);
+
+        canvas.StrokeColor = planet.Color.WithAlpha(0.35f);
+        canvas.StrokeSize = 1.5f;
+        canvas.DrawCircle(planet.Position.X, planet.Position.Y, planet.Radius + 4);
+
+        canvas.FontColor = planet.Color.WithAlpha(0.9f);
+        canvas.FontSize = 13f;
+        canvas.DrawString(
+            planet.Name,
+            planet.Position.X + planet.Radius + 6,
+            planet.Position.Y - 6,
+            HorizontalAlignment.Left);
     }
 
     private static void DrawStar(ICanvas canvas, Star star, PointF pos, bool highlighted)

@@ -5,6 +5,7 @@ using Microsoft.Maui.Graphics;
 using StarsTracker.Controls;
 using StarsTracker.Models;
 using StarsTracker.Services;
+using StarsTracker.Shared.Contracts;
 
 namespace StarsTracker.ViewModels;
 
@@ -13,6 +14,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly StarCatalogService _catalog;
     private readonly OrientationService _orientation;
     private readonly LandmarkService _landmarks;
+    private readonly SkyServerClient _skyServer;
+
+    // Server-side payloads (refreshed periodically; survive offline via disk cache).
+    private IReadOnlyList<PlanetPositionDto> _planets = [];
+    private IReadOnlyList<ConstellationDto> _constellations = [];
+    private Dictionary<string, Star> _starsByName = new(StringComparer.OrdinalIgnoreCase);
+    private DateTime _lastPlanetsFetch = DateTime.MinValue;
 
     // Camera horizontal FOV in degrees. Initial guess for a typical smartphone
     // main rear camera; overwritten by Camera2 characteristics during preview
@@ -94,11 +102,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private double _longitudeDeg;
     private bool _hasLocation;
 
-    public MainViewModel(StarCatalogService catalog, OrientationService orientation, LandmarkService landmarks)
+    public MainViewModel(
+        StarCatalogService catalog,
+        OrientationService orientation,
+        LandmarkService landmarks,
+        SkyServerClient skyServer)
     {
         _catalog = catalog;
         _orientation = orientation;
         _landmarks = landmarks;
+        _skyServer = skyServer;
         _orientation.OrientationChanged += OnOrientationChanged;
         UpdateCalibrationStatusText();
 
@@ -151,6 +164,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         StatusText = "Loading star catalog...";
         _allStars = await _catalog.GetVisibleStarsAsync();
+        _starsByName = _allStars.ToDictionary(s => s.Name, StringComparer.OrdinalIgnoreCase);
 
         StatusText = "Acquiring GPS location...";
         await RequestLocationAsync();
@@ -158,12 +172,49 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         StatusText = "Starting sensors...";
         _orientation.Start();
 
+        // Pull constellations once (static) and planets immediately. Fire-and-
+        // forget — the overlay degrades gracefully without these.
+        _ = FetchConstellationsAsync();
+        _ = FetchPlanetsAsync(force: true);
+
         _refreshTimer = Application.Current!.Dispatcher.CreateTimer();
         _refreshTimer.Interval = TimeSpan.FromMilliseconds(100);
         _refreshTimer.Tick += (_, _) => Refresh();
         _refreshTimer.Start();
 
         StatusText = string.Empty;
+    }
+
+    private async Task FetchConstellationsAsync()
+    {
+        try
+        {
+            var result = await _skyServer.GetConstellationsAsync();
+            if (result is not null) _constellations = result;
+        }
+        catch
+        {
+            // SkyServerClient handles its own offline fallback; swallow here.
+        }
+    }
+
+    private async Task FetchPlanetsAsync(bool force = false)
+    {
+        if (!force && (DateTime.UtcNow - _lastPlanetsFetch) < TimeSpan.FromMinutes(10))
+            return;
+
+        try
+        {
+            var result = await _skyServer.GetPlanetsAsync(DateTime.UtcNow);
+            if (result is not null)
+            {
+                _planets = result;
+                _lastPlanetsFetch = DateTime.UtcNow;
+            }
+        }
+        catch
+        {
+        }
     }
 
     public void SetScreenSize(double width, double height)
@@ -183,6 +234,99 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (horizontalFovDeg < 30 || horizontalFovDeg > 120) return;
         _fovHorizontalDeg = horizontalFovDeg;
     }
+
+    /// <summary>
+    /// Projects every body returned by the API onto screen pixels using the
+    /// same astronomy + 3D-rotation pipeline as the stars, plus a per-body
+    /// colour and radius for the drawable to render.
+    /// </summary>
+    private List<StarOverlayDrawable.ProjectedPlanet> ProjectPlanets(
+        DateTime utcNow,
+        double focal,
+        double cx,
+        double cy,
+        double[]? r,
+        bool useQuat,
+        double azCal,
+        double altCal)
+    {
+        var list = new List<StarOverlayDrawable.ProjectedPlanet>(_planets.Count);
+        foreach (var body in _planets)
+        {
+            AstronomyService.EquatorialToHorizontal(
+                body.RightAscensionDeg, body.DeclinationDeg,
+                _latitudeDeg, _longitudeDeg,
+                utcNow,
+                out double az, out double alt);
+
+            alt += AstronomyService.AtmosphericRefractionDeg(alt);
+            if (alt < -5.0) continue;
+
+            var (wE, wN, wU) = ProjectionMath.AzAltToWorldVector(az - azCal, alt - altCal);
+            double dx, dy, dz;
+            if (useQuat)
+            {
+                (dx, dy, dz) = OrientationMath.WorldToDevice(r!, wE, wN, wU);
+            }
+            else
+            {
+                double devAz = _orientation.AzimuthDeg * Math.PI / 180.0;
+                double devAlt = _orientation.AltitudeDeg * Math.PI / 180.0;
+                double dEastRel = wE * Math.Cos(devAz) - wN * Math.Sin(devAz);
+                double dNorthRel = wE * Math.Sin(devAz) + wN * Math.Cos(devAz);
+                dx = dEastRel;
+                dy = wU * Math.Cos(devAlt) - dNorthRel * Math.Sin(devAlt);
+                dz = -(dNorthRel * Math.Cos(devAlt) + wU * Math.Sin(devAlt));
+            }
+
+            var screen = ProjectionMath.Project(dx, dy, dz, cx, cy, focal);
+            if (screen is null) continue;
+            float sx = (float)screen.Value.sx;
+            float sy = (float)screen.Value.sy;
+            if (sx < -100 || sx > _screenWidth + 100) continue;
+            if (sy < -100 || sy > _screenHeight + 100) continue;
+
+            var (color, radius) = PlanetStyle(body.Name);
+            list.Add(new StarOverlayDrawable.ProjectedPlanet(
+                body.Name, new PointF(sx, sy), color, radius));
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// Connects each constellation line's endpoint stars by their projected
+    /// pixel positions. Drops the segment when either endpoint is not in
+    /// the currently visible star set.
+    /// </summary>
+    private List<(PointF From, PointF To)> ProjectConstellationLines(
+        IReadOnlyDictionary<string, PointF> projectedStarPositions)
+    {
+        var lines = new List<(PointF, PointF)>();
+        foreach (var c in _constellations)
+        {
+            foreach (var seg in c.Lines)
+            {
+                if (projectedStarPositions.TryGetValue(seg.FromStar, out var from) &&
+                    projectedStarPositions.TryGetValue(seg.ToStar, out var to))
+                {
+                    lines.Add((from, to));
+                }
+            }
+        }
+        return lines;
+    }
+
+    private static (Color color, float radius) PlanetStyle(string name) => name switch
+    {
+        "Sun"     => (Color.FromArgb("#FFD24A"), 14f),
+        "Moon"    => (Color.FromArgb("#E5E5F0"), 14f),
+        "Mercury" => (Color.FromArgb("#C8B98C"),  5f),
+        "Venus"   => (Color.FromArgb("#F4E8C8"),  7f),
+        "Mars"    => (Color.FromArgb("#E07050"),  6f),
+        "Jupiter" => (Color.FromArgb("#E5C284"),  8f),
+        "Saturn"  => (Color.FromArgb("#E2D294"),  7f),
+        _         => (Colors.White,               5f),
+    };
 
     /// <summary>
     /// Renders a light-year distance with appropriate precision: two
@@ -281,7 +425,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             }
         }
 
-        StarDrawable.Update(projected, highlighted);
+        // ---- Planets ----
+        var projectedPlanets = ProjectPlanets(utcNow, focal, cx, cy, r, useQuat, azCal, altCal);
+
+        // ---- Constellation lines ----
+        var projectedStarPositions = projected
+            .GroupBy(p => p.Item1.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().Item2, StringComparer.OrdinalIgnoreCase);
+        var constellationLines = ProjectConstellationLines(projectedStarPositions);
+
+        StarDrawable.Update(projected, highlighted, projectedPlanets, constellationLines);
 
         HasHighlightedStar = highlighted is not null;
         HighlightedStarName = highlighted?.Name ?? string.Empty;

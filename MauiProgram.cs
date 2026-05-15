@@ -27,6 +27,9 @@ public static class MauiProgram
         builder.Services.AddSingleton<OrientationService>();
         builder.Services.AddSingleton<LandmarkService>();
 
+        // Sky-server API client (planets, constellations).
+        builder.Services.AddHttpClient<SkyServerClient>();
+
         // ViewModel & Page
         builder.Services.AddTransient<MainViewModel>();
         builder.Services.AddTransient<MainPage>(sp =>

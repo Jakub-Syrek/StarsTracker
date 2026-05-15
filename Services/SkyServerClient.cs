@@ -1,0 +1,137 @@
+using System.Net.Http.Json;
+using StarsTracker.Shared.Contracts;
+
+namespace StarsTracker.Services;
+
+/// <summary>
+/// Thin HTTP client for the StarsTracker.Api server. Wraps the planets and
+/// constellations endpoints in async methods and caches the last successful
+/// payload in app-local storage so the overlay keeps working offline.
+/// </summary>
+public sealed class SkyServerClient
+{
+    /// <summary>
+    /// Production base URL — Railway deployment. Override at build time
+    /// with <c>STARSTRACKER_API_BASE</c> environment variable during local
+    /// development against a localhost server.
+    /// </summary>
+    public const string DefaultBaseUrl = "https://starstracker-api.up.railway.app";
+
+    private static readonly TimeSpan PlanetCacheTtl = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan ConstellationCacheTtl = TimeSpan.FromDays(7);
+
+    private readonly HttpClient _http;
+    private readonly string _planetCachePath;
+    private readonly string _constellationCachePath;
+
+    public SkyServerClient(HttpClient http)
+    {
+        _http = http;
+        if (_http.BaseAddress is null)
+        {
+            var configured = Environment.GetEnvironmentVariable("STARSTRACKER_API_BASE");
+            _http.BaseAddress = new Uri(string.IsNullOrWhiteSpace(configured)
+                ? DefaultBaseUrl
+                : configured);
+        }
+        _http.Timeout = TimeSpan.FromSeconds(8);
+
+        string cacheDir = Path.Combine(FileSystem.AppDataDirectory, "sky-cache");
+        Directory.CreateDirectory(cacheDir);
+        _planetCachePath = Path.Combine(cacheDir, "planets.json");
+        _constellationCachePath = Path.Combine(cacheDir, "constellations.json");
+    }
+
+    /// <summary>
+    /// Fetches the planets payload for the supplied UTC. Falls back to the
+    /// on-disk cache (if fresh) and then to whatever cached payload exists
+    /// (even if stale) when the network is unreachable.
+    /// </summary>
+    public async Task<IReadOnlyList<PlanetPositionDto>?> GetPlanetsAsync(DateTime utc, CancellationToken ct = default)
+    {
+        if (TryReadCache<PlanetsResponse>(_planetCachePath, PlanetCacheTtl, out var fresh))
+        {
+            return fresh!.Bodies;
+        }
+
+        try
+        {
+            string url = $"/api/v1/planets?utc={utc:O}";
+            var response = await _http.GetFromJsonAsync<PlanetsResponse>(url, ct);
+            if (response is not null)
+            {
+                WriteCache(_planetCachePath, response);
+                return response.Bodies;
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            // Network problem — fall back to stale cache below.
+        }
+
+        return TryReadCache<PlanetsResponse>(_planetCachePath, TimeSpan.MaxValue, out var stale)
+            ? stale!.Bodies
+            : null;
+    }
+
+    /// <summary>
+    /// Fetches the constellation stick figures. The data is static, so we
+    /// cache aggressively (7-day TTL) and reuse stale on offline.
+    /// </summary>
+    public async Task<IReadOnlyList<ConstellationDto>?> GetConstellationsAsync(CancellationToken ct = default)
+    {
+        if (TryReadCache<List<ConstellationDto>>(_constellationCachePath, ConstellationCacheTtl, out var fresh))
+        {
+            return fresh!;
+        }
+
+        try
+        {
+            var response = await _http.GetFromJsonAsync<List<ConstellationDto>>("/api/v1/constellations", ct);
+            if (response is not null)
+            {
+                WriteCache(_constellationCachePath, response);
+                return response;
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+        }
+
+        return TryReadCache<List<ConstellationDto>>(_constellationCachePath, TimeSpan.MaxValue, out var stale)
+            ? stale!
+            : null;
+    }
+
+    private static bool TryReadCache<T>(string path, TimeSpan ttl, out T? value)
+    {
+        value = default;
+        if (!File.Exists(path)) return false;
+        if (ttl != TimeSpan.MaxValue && DateTime.UtcNow - File.GetLastWriteTimeUtc(path) > ttl) return false;
+        try
+        {
+            using var stream = File.OpenRead(path);
+            value = System.Text.Json.JsonSerializer.Deserialize<T>(stream);
+            return value is not null;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void WriteCache<T>(string path, T value)
+    {
+        try
+        {
+            var json = System.Text.Json.JsonSerializer.Serialize(value);
+            File.WriteAllText(path, json);
+        }
+        catch
+        {
+            // Cache writes are best-effort.
+        }
+    }
+
+    private sealed record PlanetsResponse(DateTime Utc, IReadOnlyList<PlanetPositionDto> Bodies);
+}
